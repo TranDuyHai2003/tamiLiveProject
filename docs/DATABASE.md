@@ -223,7 +223,7 @@ Danh sách này suy ra từ [BUSINESS.md §9](BUSINESS.md). Đánh số S1–S13
 - API mới: kick thành viên (xem BUSINESS §3), `GET /rooms/:id/messages?after=` để lấy lại tin bị lỡ.
 - Vận hành: khi tắt server, gửi close frame cho mọi WebSocket (`http.Server.Shutdown` không quản lý kết nối đã hijack); log có cấu trúc cả các lỗi 4xx của luồng tiền.
 
-**Thứ tự triển khai:** xem [ROADMAP.md](ROADMAP.md) (phase 1: S7, S11, S12 · phase 2: S1–S5 · phase 3: S6 · phase 5: S8, S9 · phase 6: S13 · phase 7: S10).
+**Thứ tự triển khai:** xem [ROADMAP.md](ROADMAP.md) (bước 0: S7, S11, S12 ✅ · bước 5: S1–S5 · bước 6: S6 · bước 9: S8, S9 · bước 10: S13 · bước 12: S10).
 
 ## 6. Quy trình làm việc với DB
 

@@ -1,197 +1,377 @@
-# Lộ trình triển khai — TamiLive backend
+# Lộ trình xây dựng TamiLive — từ nền móng tới production
 
-> Một nguồn duy nhất cho câu hỏi "đang làm gì, làm tiếp gì, xong khi nào".
+> Một nguồn duy nhất cho câu hỏi "đang làm gì, làm tiếp gì, vì sao, xong khi nào".
 > Luật nghiệp vụ xem [BUSINESS.md](BUSINESS.md), schema xem [DATABASE.md](DATABASE.md) (mã S1–S13), kiến trúc xem [TECHSTACK.md](TECHSTACK.md).
 
-## Cách làm mỗi phase
+## Phần A — Cách một senior fullstack sắp thứ tự công việc
 
-| Bước | Việc | Ai |
+Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm frontend", cũng không làm "hết tính năng rồi mới deploy". Họ đi theo 8 nguyên tắc:
+
+| # | Nguyên tắc | Nghĩa là | Nếu bỏ qua |
+|---|---|---|---|
+| 1 | **Chạy được trước, đầy đủ sau** (walking skeleton) | Dựng sớm một lát mỏng xuyên qua **mọi tầng**: giao diện → API → DB → video → deploy. Sau đó mới đắp thêm tính năng | Mỗi tầng tự đúng, ghép lại mới lộ lỗi, lúc đó sửa rất đắt |
+| 2 | **Chia theo lát dọc giá trị người dùng** | Mỗi bước xong là người dùng **làm được một việc mới** (xem live, tặng quà, đấu PK), gồm cả backend lẫn giao diện | Làm hàng tháng không có gì để thử thật |
+| 3 | **Rủi ro lớn nhất làm trước** | Thứ chưa chắc chạy được (video WebRTC qua mạng thật) và thứ sai là mất tiền (sổ cái) phải được chứng minh sớm nhất | Phát hiện "video không chạy trên 4G" khi đã làm xong mọi thứ |
+| 4 | **Lưới an toàn trước khi tăng tốc** | Có test tự động và CI **trước** khi sửa các luồng tiền | Mỗi lần sửa phải thử tay lại mọi thứ, hoặc không ai dám sửa |
+| 5 | **Hợp đồng trước, cài đặt sau** | Chốt định dạng API (đường dẫn, request, response, mã lỗi) **trước** khi frontend dùng | Frontend và backend hiểu khác nhau, sửa qua sửa lại |
+| 6 | **Deploy sớm, deploy thường xuyên** | Có môi trường staging ngay sau khi có bộ khung; từ đó mỗi bước xong đều lên staging | Lần deploy đầu tiên là lần đau nhất, và rơi đúng lúc sắp ra mắt |
+| 7 | **Mỗi bước có "Xong khi" đo được** | Kết thúc bằng danh sách kiểm chứng cụ thể, ở trạng thái build được, chạy được, đã commit | "Gần xong" kéo dài mãi |
+| 8 | **Không tối ưu sớm** | Hub WebSocket, chia nhỏ ví hệ thống… chỉ làm khi **đo** thấy cần | Tốn công cho vấn đề chưa tồn tại |
+
+**Dự án này đã đi khác thứ tự đó ở đâu:** ta làm sâu phần tiền (bước 0) trước khi có bộ khung chạy được. Điều này chấp nhận được, vì tiền là rủi ro "sai là mất tiền" lớn nhất. Nhưng từ đây phải quay về đúng nguyên tắc: **dựng lưới an toàn (bước 1) → bộ khung chạy thật (bước 2–4) → rồi mới đắp tính năng**.
+
+## Phần B — Cách làm mỗi bước
+
+| Giai đoạn | Việc | Ai |
 |---|---|---|
-| 1. Giải thích | Phase này giải quyết vấn đề nghiệp vụ gì, sửa những gì, vì sao | Claude |
-| 2. Chốt | Các quyết định còn mở trong phase | Bạn |
-| 3. Làm | Sửa migration → `sqlc generate` → sửa code | Claude |
-| 4. Kiểm chứng | Chạy đúng các tiêu chí "Xong khi" của phase trên DB tạm | Claude, báo kết quả |
+| 1. Giải thích | Bước này giải quyết vấn đề gì, làm những gì, vì sao | Claude |
+| 2. Chốt | Các quyết định còn mở | Bạn |
+| 3. Làm | Code, migration, cấu hình | Claude |
+| 4. Kiểm chứng | Chạy đúng các tiêu chí "Xong khi" | Claude, báo kết quả |
 | 5. Tổng kết và commit | Đã đổi gì, luật nào giờ được bảo vệ ở đâu | Claude giải thích, bạn duyệt |
 
-Mỗi phase kết thúc ở trạng thái **build được, chạy được, đã commit**. Không phase nào để code dở.
+## Phần C — Tổng quan các bước
 
-## Tổng quan
-
-| Phase | Tên | Mở khóa cho sản phẩm | Trạng thái |
+| Bước | Tên | Sau bước này, người dùng / đội làm được gì | Trạng thái |
 |---|---|---|---|
-| 0 | Nền móng | Đăng ký, đăng nhập, mở phòng, vào phòng, chat, tặng quà | ✅ Xong |
-| 1 | Luật nền của dữ liệu tài chính | (không có tính năng mới, chỉ siết luật) | ✅ Xong |
-| **2** | **Tặng quà theo luật đã chốt** | Rate theo host, level/EXP, quà độc quyền | 🔜 **Tiếp theo** |
-| 3 | Nạp tiền | User có coin thật (sandbox) → **xong MVP-2** | Chờ |
-| 4 | Realtime hoàn chỉnh | Kick, lấy lại tin bị lỡ, sự kiện phòng | Chờ |
-| 5 | PK | Mời, đấu, chốt trận, phạt, chuỗi thắng → **xong MVP-3** | Chờ |
-| 6 | Mini game an toàn | Thưởng có trần, host duyệt ghế, mic → **xong MVP-4** | Chờ |
-| 7 | Rút tiền | Host rút GEM ra tiền, KYC, thuế → giai đoạn 2 | Chờ |
+| 0 | Nền móng backend + luật dữ liệu tiền | (Chỉ backend) Đăng ký, phòng, chat, tặng quà; DB chặn mọi dữ liệu tiền sai | ✅ Xong |
+| **1** | **Môi trường dev và lưới an toàn** | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | 🔜 **Tiếp theo** |
+| 2 | Hợp đồng API | Frontend biết chính xác API trả gì, lỗi trông thế nào | Chờ |
+| 3 | Bộ khung chạy thật (MVP-1) | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | Chờ |
+| 4 | Lên staging | Thử trên điện thoại, qua mạng thật, có HTTPS | Chờ |
+| 5 | Tặng quà theo luật đã chốt | Tặng quà có hiệu ứng, rate theo host, level, quà độc quyền | Chờ |
+| 6 | Nạp tiền (xong MVP-2) | Nạp tiền sandbox, xem số dư; chargeback | Chờ |
+| 7 | Vận hành phòng | Host kick người; rớt mạng tự kết nối lại không mất tin | Chờ |
+| 8 | Auth hoàn chỉnh, chống lạm dụng | Đăng nhập lâu dài an toàn, đăng xuất, giới hạn spam | Chờ |
+| 9 | PK (xong MVP-3) | Hai host mời nhau đấu, điểm chạy trực tiếp, có phạt | Chờ |
+| 10 | Mini game (xong MVP-4) | Chơi game trong phòng, lên ghế, nói qua mic, nhận thưởng | Chờ |
+| 11 | Sẵn sàng production | Giám sát, sao lưu, chịu tải, rà soát bảo mật | Chờ |
+| 12 | Rút tiền và CMS admin | Host rút GEM ra tiền; admin quản lý quà, duyệt rút | Chờ |
 
-**Vì sao thứ tự này:** đi từ **luật** (phase 1) → **tiền** (phase 2, 3) → **tương tác** (phase 4, 5, 6) → **chi trả** (phase 7). Phase sau xây trên phase trước: PK cộng điểm bên trong transaction tặng quà (phase 2), mini game trả thưởng qua sổ cái và ngân sách (phase 1), rút tiền cần ví escrow không được âm (phase 1).
-
----
-
-## Phase 0 — Nền móng ✅
-
-**Đã có:** auth JWT + bcrypt; ví tạo cùng lúc đăng ký; sổ cái kế toán kép (`postLedger`); tặng quà có idempotency, khóa theo thứ tự, cộng điểm PK trong cùng transaction; phòng LIVE, vào phòng, token LiveKit do server tính quyền; chat WebSocket qua Redis; PK và mini game ở tầng service; 6 migration gộp đủ ràng buộc; tài liệu nghiệp vụ.
-
-**Cần hiểu:** Phần 1–4 của chuỗi giải thích (bức tranh hệ thống, luồng tiền, phòng và chat, PK và mini game).
+**Logic thứ tự:** lưới an toàn (1) → hợp đồng (2) → bộ khung chạy thật trên mọi tầng (3) → môi trường thật (4) → đắp tính năng theo giá trị: tiền (5, 6) → vận hành (7, 8) → tương tác (9, 10) → sẵn sàng ra mắt (11) → chi trả (12).
 
 ---
 
-## Phase 1 — Luật nền của dữ liệu tài chính ✅
+## Bước 0 — Nền móng backend + luật dữ liệu tiền ✅
 
-**Vấn đề nghiệp vụ:** dữ liệu tiền phải trả lời đúng ba câu hỏi, và DB phải **ép** được, không chỉ dựa vào code:
-1. Tiền này chuyển đi vì lý do gì? → **S7** loại giao dịch
-2. Có được làm mất biên lai không? → **S11** chính sách xóa
-3. Ví nào là quỹ có hạn, ví nào là nguồn phát hành? → **S12** ví được âm
+*(Trước đây gọi là phase 0 và phase 1.)*
 
-**Phạm vi**
+**Đã có:**
+- Kiến trúc 4 lớp; auth JWT + bcrypt; ví tạo cùng lúc với tài khoản.
+- Sổ cái kế toán kép (`postLedger`); tặng quà có idempotency, khóa theo thứ tự, cộng điểm PK trong cùng transaction.
+- Phòng LIVE, token LiveKit do server tính quyền; chat WebSocket qua Redis; PK và mini game ở tầng service.
+- **Luật dữ liệu tiền ở DB** (S7, S11, S12):
+  - Loại giao dịch là sự kiện nghiệp vụ; hoàn tiền chỉ một lần.
+  - Không xóa được biên lai.
+  - Ví quỹ và ví user không được âm (cột `allow_negative`); quỹ thưởng nạp từ `PROMO_BUDGET`.
 
-| Lớp | Thay đổi |
-|---|---|
-| DB | 000002: enum loại giao dịch mới, hoàn tiền phải có giao dịch gốc + chỉ hoàn 1 lần, cột `wallets.allow_negative` + CHECK khóa cứng ví USER, ví mới `PROMO_BUDGET`, `wallets.user_id` RESTRICT. 000004 + 000006: CASCADE → RESTRICT ở bảng biên lai |
-| Query | `ApplyWalletCoinDelta` / `ApplyWalletGemDelta` đọc `allow_negative` |
-| Code | `GIFT_SEND` → `GIFT`; thưởng game hết ngân sách báo rõ "game reward budget exhausted" |
-| Dev | `db/scripts/dev_fund_reward_budget.sql`: `PROMO_BUDGET` → `SYSTEM_REWARD` |
+**Đã kiểm chứng:**
+- Migration chạy lên/xuống sạch.
+- DB chặn xóa biên lai, chặn hoàn tiền hai lần, chặn ví user âm.
+- Thưởng game khi hết quỹ trả 402.
+- 30 request tặng quà song song; tổng số dư bằng 0; mọi ví khớp sổ cái.
 
-**Đã chốt:** dùng cột `allow_negative` + CHECK khóa cứng ví USER; `PLATFORM_REVENUE` được âm (để luôn hoàn được tiền khi nền tảng gây lỗi); ngân sách thưởng lấy từ ví riêng `PROMO_BUDGET`, không trừ doanh thu.
+---
 
-**Cần hiểu:** phân biệt ví phát hành / ví quỹ; vì sao đặt chốt chặn RESTRICT ở biên lai chứ không ở bảng cha; vì sao một luật không nên nằm ở hai nơi.
+## Bước 1 — Môi trường dev và lưới an toàn 🔜
+
+**Để làm gì:** bất kỳ ai (kể cả bạn sau 3 tháng) clone repo về chạy được bằng **một lệnh**, và mọi luồng tiền có **test tự động** báo lỗi ngay khi ai đó làm hỏng.
+
+**Vì sao làm lúc này:**
+- Các bước 5, 6, 9 đều sửa sâu vào luồng tiền. Không có test, mỗi lần sửa phải thử tay lại mọi thứ như ta đã làm ở bước 0 (khởi động container, chạy script, đọc kết quả).
+- Nguyên tắc 4: lưới an toàn trước khi tăng tốc.
+- Bước 3 cần LiveKit chạy ở máy dev, mà hiện chưa có.
+
+**Làm theo thứ tự:**
+1. `docker-compose.yml`: Postgres 16, Redis 7, **LiveKit server ở chế độ dev**. Tách cổng khỏi các container của dự án khác trên máy.
+2. `.env.example` liệt kê đủ biến môi trường kèm giải thích; `.env` cho dev trỏ vào docker-compose.
+3. `Makefile`: `make up` (dựng môi trường), `make migrate`, `make reset-db`, `make sqlc`, `make run`, `make test`.
+4. **Test tích hợp với Postgres thật** (không giả lập DB cho phần tiền):
+   - `postLedger`: cân bằng, không đủ tiền, thứ tự khóa.
+   - `SendGift`: thành công, replay idempotency, khác body, thiếu tiền, tự tặng, phòng không LIVE, cộng điểm PK.
+   - Test đồng thời: nhiều goroutine tặng quà từ cùng một ví, số dư cuối đúng, không âm, sổ cái cân.
+   - Bất biến sau mỗi test: tổng số dư = 0, mọi ví khớp sổ cái.
+5. CI (GitHub Actions): `go build`, `go vet`, test, kiểm tra `sqlc generate` không tạo khác biệt, migration lên/xuống/lên. Cần đẩy repo lên GitHub.
 
 **Xong khi:**
-- [x] `migrate down -all` → `up` sạch (không sót function/enum/bảng); `sqlc generate`; `go build`
-- [x] Xóa một món quà đã từng được tặng → DB chặn (quà chưa ai tặng thì vẫn xóa được). Xóa user, phòng, game, phiên game có biên lai → DB chặn
-- [x] Hoàn tiền cùng một giao dịch hai lần → DB chặn; hoàn tiền không ghi giao dịch gốc → DB chặn
-- [x] Trả thưởng game khi `SYSTEM_REWARD` hết ngân sách → 402, không phải 500; nạp ngân sách rồi gửi lại → trả thưởng được. Bật `allow_negative` cho ví USER → DB chặn
-- [x] Tặng quà vẫn chạy (loại `GIFT`); 30 request song song + idempotency không lỗi; tổng số dư = 0; số dư mọi ví khớp sổ cái
+- [ ] Máy trống chỉ cần `make up && make migrate && make run` là server chạy
+- [ ] `make test` chạy đủ test tiền, tất cả qua
+- [ ] Cố tình phá `postLedger` (ví dụ bỏ sắp xếp) thì test báo đỏ
+- [ ] CI chạy xanh trên GitHub
+
+**Học được gì:** vì sao test tiền phải dùng DB thật; viết test đồng thời; CI là gì và chặn được gì.
 
 ---
 
-## Phase 2 — Tặng quà theo luật đã chốt
+## Bước 2 — Hợp đồng API
 
-**Vấn đề nghiệp vụ:** `SendGift` hiện chạy theo luật cũ: co-host nhận GEM, rate chung cho mọi host, chưa có level, chưa chặn user đang nợ.
+**Để làm gì:** frontend và backend thống nhất **một bản mô tả API duy nhất**: đường dẫn, request, response, mã lỗi. Frontend code theo bản đó, không phải đoán.
 
-**Phạm vi**
+**Vì sao làm lúc này:** ngay trước khi frontend bắt đầu dùng API (nguyên tắc 5). Đổi định dạng lỗi lúc chưa có client nào thì gần như miễn phí; đổi sau khi đã có app thì phải sửa cả hai bên.
 
-| Lớp | Thay đổi |
-|---|---|
-| DB | S1 rate theo host · S2 snapshot rate + `target_user_id` · S3 `exp` + bảng ngưỡng level · S4 `gifts.min_level` · S5 `RESTRICTED`, `coin_debt`, ví `CHARGEBACK_LOSS` |
-| Code | `SendGift`: khóa `users` trước (thứ tự khóa chung) → kiểm tra `RESTRICTED`, `min_level` → chỉ host nhận GEM → rate của host → cộng EXP/level. API danh mục quà `GET /gifts` |
-| Dev | Script sinh bảng ngưỡng level (seed) |
-
-**Cần hiểu:** thứ tự khóa users → rooms → wallets và vì sao vi phạm sẽ deadlock; snapshot (lưu rate vào biên lai) để lịch sử không đổi khi cấu hình đổi; receiver khác target.
+**Làm theo thứ tự:**
+1. Chuẩn hóa định dạng lỗi theo TECHSTACK: `{"error": {"code": "INSUFFICIENT_BALANCE", "message": "..."}}`, với danh sách `code` cố định để frontend xử lý theo mã, không theo câu chữ.
+2. Viết `openapi.yaml` cho các endpoint hiện có. Đây là "hợp đồng"; xem được bằng Swagger UI.
+3. Quy ước chung: phân trang (`?limit=&cursor=`), định dạng thời gian (ISO 8601, UTC), tiền luôn là số nguyên.
 
 **Xong khi:**
+- [ ] Mọi lỗi trả đúng định dạng có `code`
+- [ ] `openapi.yaml` mô tả đủ endpoint, mở được bằng Swagger UI
+- [ ] Test của bước 1 kiểm tra cả `code` lỗi
+
+**Học được gì:** API là hợp đồng giữa hai đội; vì sao lỗi cần mã máy đọc được; phân trang bằng cursor.
+
+---
+
+## Bước 3 — Bộ khung chạy thật (MVP-1)
+
+**Để làm gì:** lần đầu tiên thấy sản phẩm chạy trên trình duyệt: **một người phát, một người xem và chat**.
+
+**Vì sao làm lúc này:** đây là **rủi ro lớn nhất còn lại** (nguyên tắc 3). Video WebRTC chưa từng được chạy thử. Bộ khung đi xuyên mọi tầng nên sẽ lộ ra mọi chỗ thiếu khi ghép.
+
+**Làm theo thứ tự:**
+
+*Backend (vá chỗ thiếu mà frontend cần):*
+1. CORS cho origin của frontend.
+2. `GET /rooms?status=LIVE` có phân trang.
+3. Trả `livekit_url` cùng token khi vào phòng.
+4. `GET /healthz`, `GET /readyz`.
+
+*Frontend (repo `livestream-frontend`):*
+
+5. Dựng khung: Next.js (App Router) + TypeScript + Tailwind + Zustand; cấu trúc thư mục; một API client dùng chung, sinh kiểu từ `openapi.yaml`.
+6. Đăng ký / đăng nhập. Tạm lưu token ở bộ nhớ + `localStorage` (**nợ kỹ thuật có ghi chép**, trả ở bước 8).
+7. Trang chủ: danh sách phòng đang live.
+8. Host: nút "Lên sóng" → tạo phòng → phát camera/mic bằng LiveKit React SDK.
+9. Viewer: vào phòng → xem video.
+10. Khung chat qua WebSocket: gửi, nhận, tự cuộn.
+11. Host bấm "Kết thúc live".
+
+**Xong khi:**
+- [ ] Hai trình duyệt: A đăng nhập và lên sóng, B thấy phòng của A trong danh sách, vào xem có hình và tiếng
+- [ ] A và B chat qua lại
+- [ ] A kết thúc live thì phòng biến mất khỏi danh sách
+- [ ] Viewer không phát được hình (thử sửa client cũng không được)
+
+**Học được gì:** WebRTC/SFU hoạt động thế nào; CORS; quản lý state realtime ở frontend; kết nối REST, WebSocket và LiveKit trong một màn hình.
+
+**Chờ chốt:** giữ stack Next.js + Zustand + Tailwind; frontend ở repo riêng `livestream-frontend` (đề xuất).
+
+---
+
+## Bước 4 — Lên staging
+
+**Để làm gì:** có một địa chỉ thật (HTTPS) để thử trên **điện thoại, qua 4G, sau NAT**, những điều kiện mà máy dev không mô phỏng được.
+
+**Vì sao làm lúc này:**
+- Ngay sau khi có bộ khung (nguyên tắc 6).
+- WebRTC trên trình duyệt **bắt buộc HTTPS** (trừ localhost), và gặp vấn đề NAT/firewall chỉ khi chạy mạng thật.
+- Deploy khi hệ thống còn nhỏ là dễ nhất; từ đây mỗi bước xong đều lên staging.
+
+**Làm theo thứ tự:**
+1. `Dockerfile` cho backend (build nhiều tầng, image nhỏ).
+2. Chọn hạ tầng: một VPS chạy docker-compose (rẻ, dễ hiểu) hoặc dịch vụ quản lý sẵn. LiveKit tự chạy (cần TURN) hoặc LiveKit Cloud.
+3. Domain + HTTPS (Caddy hoặc Nginx + Let's Encrypt).
+4. Chạy migration tự động khi deploy; secret nằm trong biến môi trường của server.
+5. CI deploy tự động khi merge vào nhánh chính.
+6. Log ra định dạng JSON (`slog`) để đọc được trên server.
+
+**Xong khi:**
+- [ ] Mở `https://staging...` trên điện thoại qua 4G, xem được live do máy tính phát
+- [ ] Push code lên nhánh chính thì staging tự cập nhật
+- [ ] Xem được log lỗi của staging
+
+**Học được gì:** Docker build nhiều tầng; reverse proxy, TLS; TURN/STUN và vì sao WebRTC cần chúng; quy trình deploy tự động.
+
+**Từ thời điểm này, quy tắc "chỉ thêm migration mới, không sửa migration cũ" có hiệu lực**, vì staging là môi trường dùng chung.
+
+---
+
+## Bước 5 — Tặng quà theo luật đã chốt
+
+*(Trước đây gọi là phase 2.)*
+
+**Để làm gì:** người xem tặng quà có hiệu ứng trên màn hình; tiền chạy đúng mọi luật kinh doanh đã chốt.
+
+**Vì sao làm lúc này:** tặng quà là nguồn doanh thu; luồng tiền là lõi mà PK (bước 9) xây lên trên.
+
+**Làm theo thứ tự:**
+
+*DB (migration mới, vì đã có staging):*
+1. S1 rate theo host; S2 lưu rate và `target_user_id` vào biên lai; S3 `exp` + bảng ngưỡng level (seed); S4 `gifts.min_level`; S5 `RESTRICTED`, `coin_debt`, ví `CHARGEBACK_LOSS`.
+
+*Backend:*
+
+2. `SendGift`: khóa `users` của người gửi trước tiên (thứ tự khóa chung) → chặn `RESTRICTED` → kiểm tra `min_level` → **chỉ host nhận GEM** → rate của host → cộng EXP/level.
+3. `GET /gifts` (danh mục quà); `GET /me/wallet`.
+4. Phát sự kiện `gift.sent` lên kênh phòng sau khi COMMIT.
+5. Test: mọi luật trên + test đồng thời "vừa tặng quà vừa bị đổi trạng thái" không deadlock.
+
+*Frontend:*
+
+6. Hiển thị số dư; bảng chọn quà; nút tặng (sinh idempotency key mỗi lần bấm); hiệu ứng quà khi nhận `gift.sent`; badge level trong chat.
+
+**Xong khi:**
+- [ ] Viewer tặng quà, mọi người trong phòng thấy hiệu ứng, số dư hai bên đúng
 - [ ] Co-host không nhận GEM; buff cho người chơi thì GEM vẫn về host
-- [ ] Host rate 60% nhận đúng 60%; `gift_logs` lưu đúng rate đã áp dụng
-- [ ] User chưa đủ level không tặng được quà độc quyền
-- [ ] User `RESTRICTED` không tặng được
-- [ ] EXP/level tăng đúng, lên level đúng mốc
-- [ ] Test đồng thời: cùng user vừa tặng quà vừa bị đổi trạng thái → không deadlock
+- [ ] Host rate 60% nhận đúng 60%; biên lai lưu đúng rate
+- [ ] Chưa đủ level không tặng được quà độc quyền; user `RESTRICTED` không tặng được
+- [ ] Bấm tặng hai lần do mạng chậm chỉ bị trừ tiền một lần
+
+**Học được gì:** thứ tự khóa và deadlock; snapshot dữ liệu vào biên lai; idempotency nhìn từ phía client.
 
 ---
 
-## Phase 3 — Nạp tiền (xong MVP-2)
+## Bước 6 — Nạp tiền (xong MVP-2)
 
-**Vấn đề nghiệp vụ:** user chưa có cách nào có coin, ngoài SQL tay.
+*(Trước đây gọi là phase 3.)*
 
-**Phạm vi**
+**Để làm gì:** user tự nạp coin (sandbox), không còn phải dùng SQL tay.
 
-| Lớp | Thay đổi |
-|---|---|
-| DB | S6 `coin_packages` (theo kênh WEB/IOS/ANDROID), `topup_orders` |
-| Code | Tạo đơn → webhook cổng thanh toán (sandbox) có xác minh chữ ký → `TOPUP` + trả nợ chargeback trong cùng transaction. Webhook chargeback → luồng `CHARGEBACK` |
-| API | `GET /coin-packages`, `POST /topup/orders`, `POST /webhooks/payment/:provider` |
+**Vì sao làm lúc này:** sau khi tiêu tiền đã đúng (bước 5) mới mở cửa cho tiền vào.
 
-**Cần hiểu:** vì sao không bao giờ cộng tiền theo callback từ client; `provider_txn_id` unique để webhook gọi lặp không cộng hai lần; luồng nợ qua `CHARGEBACK_LOSS`.
+**Làm theo thứ tự:**
+1. S6: `coin_packages` (theo kênh WEB/IOS/ANDROID), `topup_orders` (khóa ngoại RESTRICT theo luật S11).
+2. Chọn một cổng thanh toán VN có sandbox; tạo đơn → trang thanh toán → **webhook có xác minh chữ ký** → `TOPUP`, trừ nợ chargeback nếu có, trong cùng transaction.
+3. Webhook chargeback → luồng `CHARGEBACK` (ví `CHARGEBACK_LOSS`, `coin_debt`, `RESTRICTED`).
+4. Frontend: trang chọn gói, chuyển sang thanh toán, quay về thấy số dư mới.
 
 **Xong khi:**
-- [ ] Nạp sandbox → coin vào ví; gọi lại webhook → không cộng thêm
-- [ ] Chargeback khi user đã tiêu hết → nợ ghi đúng, user `RESTRICTED`; nạp tiếp → trả nợ trước, về `ACTIVE`
+- [ ] Nạp sandbox thì coin vào ví; webhook gọi lặp không cộng hai lần
+- [ ] Chargeback khi user đã tiêu hết: nợ ghi đúng, user `RESTRICTED`; nạp tiếp thì trả nợ trước rồi về `ACTIVE`
 - [ ] Đối soát: `−CHARGEBACK_LOSS = SUM(coin_debt)`; tổng số dư = 0
 
+**Học được gì:** vì sao không bao giờ cộng tiền theo callback từ client; xác minh chữ ký webhook; luồng nợ trong sổ cái.
+
 ---
 
-## Phase 4 — Realtime hoàn chỉnh
+## Bước 7 — Vận hành phòng
 
-**Vấn đề nghiệp vụ:** host chưa kick được ai; người xem rớt mạng mất tin; app chưa biết khi có quà, khi phòng kết thúc.
+*(Trước đây gọi là phase 4.)*
 
-**Phạm vi**
+**Để làm gì:** host kiểm soát được phòng; người xem rớt mạng không mất gì.
 
-| Lớp | Thay đổi |
-|---|---|
-| Code | API kick (3 bước: trạng thái + `RemoveParticipant` + đóng WebSocket); `GET /rooms/:id/messages?after=`; phát sự kiện `gift.sent`, `room.ended`, `member.kicked`; token LiveKit hạn ~10 phút; close frame khi tắt server |
-| Thư viện | Thêm `livekit/server-sdk-go` |
-| Cân nhắc | ws-ticket thay token trên URL; hub WebSocket (mỗi server subscribe 1 lần/phòng) |
-
-**Cần hiểu:** ba kênh (REST, WebSocket, WebRTC) có ba cơ chế thu hồi quyền khác nhau; Redis Pub/Sub không lưu tin; "bị bắt chờ" khác "được kiểm tra lại".
+**Làm theo thứ tự:**
+1. Thêm `livekit/server-sdk-go`.
+2. API kick đủ 3 việc: đổi trạng thái thành viên + `RemoveParticipant` + sự kiện `member.kicked` đóng WebSocket. Token LiveKit hạn ~10 phút.
+3. `GET /rooms/:id/messages?after=`; sự kiện `room.ended`.
+4. Gửi close frame cho WebSocket khi tắt server.
+5. Frontend: menu kick; tự kết nối lại và lấy tin bị lỡ; màn hình "phòng đã kết thúc".
 
 **Xong khi:**
-- [ ] Kick → người đó mất video, mất chat ngay, không vào lại được
-- [ ] Rớt mạng 10 giây → kết nối lại và lấy đủ tin bị lỡ
-- [ ] Tặng quà → mọi người trong phòng nhận `gift.sent`
+- [ ] Bị kick thì mất video, mất chat ngay, không vào lại được
+- [ ] Tắt wifi 10 giây rồi bật lại: tự kết nối lại, đủ tin
+- [ ] Host kết thúc live: mọi viewer thấy thông báo
+
+**Học được gì:** ba kênh, ba cơ chế thu hồi quyền; Redis Pub/Sub không lưu tin; thiết kế kết nối lại.
 
 ---
 
-## Phase 5 — PK (xong MVP-3)
+## Bước 8 — Auth hoàn chỉnh, chống lạm dụng
 
-**Vấn đề nghiệp vụ:** PK mới có ở tầng service: không mời được, không tự hết giờ, host tắt live lại được xử thắng.
+**Để làm gì:** trả nợ kỹ thuật của bước 3 và chặn spam trước khi có người dùng thật.
 
-**Phạm vi**
+**Làm theo thứ tự:**
+1. Refresh token: chuỗi ngẫu nhiên, lưu **hash** trong `user_sessions`, cookie `HttpOnly; Secure`, xoay vòng khi làm mới; `/auth/refresh`, `/auth/logout`. Access token ngắn (~15 phút), chỉ nằm trong bộ nhớ.
+2. ws-ticket: vé dùng một lần để mở WebSocket, token thật không nằm trên URL.
+3. Rate limit bằng Redis: đăng nhập, chat, tặng quà.
+4. Ban user thì thu hồi toàn bộ session.
+5. Luồng xin làm host (role `HOST`).
 
-| Lớp | Thay đổi |
-|---|---|
-| DB | S8 `PUNISHMENT`, `ends_at`, `end_reason` + CHECK khớp kết quả, `disconnected_at` · S9 `host_pk_stats` |
-| Code | Mời/chấp nhận/hủy; `finishBattleTx` nhận "phe bị xử thua"; `EndRoom` xử thua TKO; phase phạt; chuỗi thắng |
-| Job | `pk_settlement` (theo `ends_at`), hết hạn lời mời, đếm 30 giây rời trận; khóa Redis để chỉ một server chạy |
-| Realtime | `pk.started`, `pk.score`, `pk.punishment`, `pk.ended` |
-| Thư viện | Webhook LiveKit (`participant_left`) |
+**Xong khi:**
+- [ ] Đóng trình duyệt mở lại vẫn đăng nhập; đăng xuất thì token cũ vô hiệu
+- [ ] Không còn token nào trong `localStorage` hay trên URL
+- [ ] Gửi 10 tin/giây bị chặn
 
-**Cần hiểu:** máy trạng thái của trận; FOR SHARE / FOR UPDATE khi chốt trận; vì sao Postgres là trọng tài, Redis chỉ để hiển thị; job chạy nhiều server.
+**Học được gì:** access token và refresh token khác nhau thế nào; XSS và vì sao dùng cookie HttpOnly; rate limit bằng Redis.
+
+---
+
+## Bước 9 — PK (xong MVP-3)
+
+*(Trước đây gọi là phase 5.)*
+
+**Để làm gì:** hai host mời nhau đấu, người xem tặng quà để giúp host mình thắng.
+
+**Làm theo thứ tự:**
+1. S8 (`PUNISHMENT`, `ends_at`, `end_reason`, CHECK khớp kết quả, `disconnected_at`), S9 (`host_pk_stats`).
+2. API mời / chấp nhận / hủy; `finishBattleTx` nhận "phe bị xử thua"; `EndRoom` xử thua TKO; giai đoạn phạt; chuỗi thắng.
+3. Job chạy nền có khóa Redis: chốt trận theo `ends_at`, hết hạn lời mời, đếm 30 giây rời trận.
+4. Webhook LiveKit `participant_left`.
+5. Sự kiện `pk.started`, `pk.score` (gom 5–10 lần/giây), `pk.punishment`, `pk.ended`.
+6. Frontend: màn hình chia đôi, thanh điểm, đếm ngược theo `ends_at`, hiệu ứng phạt cho phe thua.
 
 **Xong khi:**
 - [ ] Hai host đấu 300 giây, có người thắng, phạt 60 giây, chuỗi thắng cập nhật
-- [ ] Host tắt live khi đang dẫn → xử thua
-- [ ] Restart server giữa trận → trận vẫn kết thúc đúng giờ
+- [ ] Host tắt live khi đang dẫn thì bị xử thua
+- [ ] Restart server giữa trận, trận vẫn kết thúc đúng giờ
 - [ ] Quà trong lúc phạt không cộng điểm nhưng vẫn trả GEM
+
+**Học được gì:** máy trạng thái; FOR SHARE / FOR UPDATE; job nền chạy trên nhiều server; Postgres là trọng tài, Redis để hiển thị.
 
 ---
 
-## Phase 6 — Mini game an toàn (xong MVP-4)
+## Bước 10 — Mini game (xong MVP-4)
 
-**Vấn đề nghiệp vụ:** thưởng game không giới hạn, một secret dùng chung, ai xin cũng được ghế, người chơi chưa nói được.
+*(Trước đây gọi là phase 6.)*
 
-**Phạm vi**
+**Để làm gì:** người xem lên ghế chơi game trong phòng, nói chuyện qua mic, người thắng nhận thưởng.
 
-| Lớp | Thay đổi |
-|---|---|
-| DB | S13 secret riêng từng game, bảng luật thưởng, trần thưởng |
-| Code | `SubmitResult` tự tính thưởng theo bảng, áp trần, vượt trần → `PENDING`; host duyệt ghế; game token cho iframe; quyền chỉ mic qua `UpdateParticipant` |
-
-**Cần hiểu:** ranh giới tin cậy; chữ ký chỉ trả lời "tin từ ai", không trả lời "số tiền có hợp lý không"; nhiều lớp phòng thủ.
+**Làm theo thứ tự:**
+1. S13: secret riêng từng game, bảng luật thưởng, trần thưởng.
+2. `SubmitResult` tự tính thưởng theo bảng, áp trần, vượt trần thì `PENDING`.
+3. Host duyệt ghế; game token cho iframe; quyền chỉ mic qua `UpdateParticipant`.
+4. Một game mẫu đơn giản (tự viết) để thử trọn vòng.
+5. Frontend: iframe game, danh sách ghế, nút xin lên ghế, mic.
 
 **Xong khi:**
-- [ ] Provider gửi thưởng vượt trần → `PENDING`, không trả tiền
-- [ ] Secret của game A không ký được kết quả cho game B
-- [ ] Hết ngân sách thưởng → DB chặn
+- [ ] Chơi trọn một ván, người thắng nhận COIN
+- [ ] Thưởng vượt trần thì `PENDING`, không trả tiền
+- [ ] Secret game A không ký được kết quả cho game B; hết ngân sách thì DB chặn
+
+**Học được gì:** ranh giới tin cậy; iframe và `postMessage`; phòng thủ nhiều lớp.
 
 **Chờ chốt:** con số trần thưởng, ngân sách tháng.
 
 ---
 
-## Phase 7 — Rút tiền (giai đoạn 2)
+## Bước 11 — Sẵn sàng production
 
-**Phạm vi:** S10 (VNĐ gross/thuế/net, snapshot tỷ giá); `CASHOUT_HOLD` / `PAYOUT` / `RELEASE`; KYC host; giới hạn 1 lần/tuần; CMS admin duyệt.
+**Để làm gì:** đủ tự tin để mở cho người dùng thật và tiền thật.
 
-**Chờ chốt:** kế toán xác nhận mức thuế TNCN.
+**Làm theo thứ tự:**
+1. Giám sát: metrics (Prometheus) cho số kết nối, độ trễ API, giao dịch/giây, lỗi; cảnh báo.
+2. Job đối soát sổ cái hằng ngày, cảnh báo khi lệch.
+3. Sao lưu Postgres tự động **và thử khôi phục**.
+4. Thử tải: nhiều người xem một phòng, nhiều quà mỗi giây. Đo xem có cần hub WebSocket hay chia nhỏ ví hệ thống không (nguyên tắc 8).
+5. Rà soát bảo mật: secret, CORS, kiểm tra Origin của WebSocket, quyền admin.
+6. Pháp lý: điều khoản sử dụng, chính sách nội dung, chính sách của Apple/Google nếu có app.
+
+**Xong khi:**
+- [ ] Có dashboard và cảnh báo
+- [ ] Đã khôi phục thành công từ bản sao lưu
+- [ ] Có số liệu chịu tải và đã xử lý điểm nghẽn
 
 ---
 
-## Việc xuyên suốt (làm dần ở mọi phase)
+## Bước 12 — Rút tiền và CMS admin
 
-- **Test tích hợp** với Postgres thật cho mọi luồng tiền, gồm test đồng thời.
-- `docker-compose.yml` cho dev: Postgres, Redis, LiveKit.
-- `GET /healthz`, `GET /readyz`; log có cấu trúc (`slog`), gồm cả lỗi 4xx của luồng tiền.
-- Job đối soát sổ cái hằng ngày.
+*(Trước đây gọi là phase 7.)*
+
+**Để làm gì:** host đổi GEM ra tiền thật; admin vận hành hằng ngày không cần SQL.
+
+**Làm theo thứ tự:**
+1. S10 (VNĐ gộp/thuế/thực nhận, snapshot tỷ giá); KYC host.
+2. `CASHOUT_HOLD` / `PAYOUT` / `RELEASE`; giới hạn 1 lần/tuần; ngưỡng thuế cộng dồn theo tháng.
+3. CMS admin: quản lý quà và game, duyệt rút tiền, hoàn tiền thủ công, nạp ngân sách thưởng, xử lý vi phạm, ẩn phòng.
+
+**Chờ chốt:** kế toán xác nhận thuế TNCN.
+
+---
+
+## Việc xuyên suốt mọi bước
+
+- Mỗi luồng tiền mới đều có test tích hợp, kể cả test đồng thời.
+- Mỗi endpoint mới đều được cập nhật vào `openapi.yaml`.
+- Mỗi quyết định nghiệp vụ mới đều ghi vào BUSINESS.md §9.
+- Từ bước 4: mỗi bước xong đều chạy được trên staging.

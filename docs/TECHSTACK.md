@@ -162,9 +162,9 @@ Chạy trong cùng binary (goroutine + `time.Ticker`), mỗi lần chạy lấy 
 
 ## 6. Môi trường & vận hành
 
-**Dev local** — nên có `docker-compose.yml` gồm: `postgres:16`, `redis:7`, `livekit/livekit-server --dev`, (tùy chọn) `livekit/ingress`.
+**Dev local** — `docker-compose.yml` (đã có, bước 1): `postgres:16-alpine` :5440, `redis:7-alpine` :6390, `livekit/livekit-server:v1.13.9` :7980–7982. Cách chạy xem README. (Tùy chọn sau này) `livekit/ingress` cho OBS.
 
-**Biến môi trường tối thiểu**
+**Biến môi trường** — danh sách đầy đủ, có giải thích, nằm trong `.env.example` (nguồn sự thật). Danh sách dưới đây là các biến **dự kiến** cho các bước sau:
 
 ```text
 APP_ENV, HTTP_ADDR

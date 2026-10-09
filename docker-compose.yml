@@ -1,0 +1,45 @@
+# Môi trường dev của livestream-backend: `make up` để dựng.
+# Cổng được chọn để không đụng các dự án khác trên máy (5432–5434, 6379–6380, 7880–7882).
+name: livestream
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: livestream
+    ports:
+      - "5440:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Tạo thêm database livestream_test cho test tích hợp (chỉ chạy lần đầu khi volume còn trống)
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d livestream"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6390:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7980:7980"       # HTTP/WebSocket signaling (client kết nối ws://localhost:7980)
+      - "7981:7981"       # WebRTC qua TCP (dự phòng khi UDP bị chặn)
+      - "7982:7982/udp"   # WebRTC qua UDP: đường đi chính của video/audio
+
+volumes:
+  pgdata:

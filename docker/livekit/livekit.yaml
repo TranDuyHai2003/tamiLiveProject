@@ -1,0 +1,20 @@
+# Cấu hình LiveKit cho DEV. Không dùng cho staging/production.
+port: 7980
+
+rtc:
+  tcp_port: 7981
+  # Một cổng UDP cố định thay cho dải mặc định 50000-60000,
+  # để không tranh cổng với LiveKit của dự án khác và dễ map qua Docker.
+  udp_port: 7982
+  # Trong Docker, LiveKit tự thấy IP nội bộ của container (172.x), trình duyệt không tới được:
+  # kết nối báo thành công nhưng không có hình. Khai báo IP mà trình duyệt kết nối tới.
+  use_external_ip: false
+  node_ip: 127.0.0.1
+
+# API key / secret dùng để ký token. Backend phải dùng đúng cặp này
+# (LIVEKIT_API_KEY / LIVEKIT_API_SECRET trong .env). LiveKit yêu cầu secret >= 32 ký tự.
+keys:
+  devkey: dev_livekit_secret_change_me_0123456789
+
+logging:
+  level: info

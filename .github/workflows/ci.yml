@@ -1,0 +1,79 @@
+# Chạy mỗi lần push hoặc mở PR vào main. Đỏ = không được merge.
+# Phiên bản công cụ được ghim giống hệt môi trường dev (xem README).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  SQLC_VERSION: 1.31.1
+  MIGRATE_VERSION: v4.20.1
+  MIGRATE_DB: postgresql://postgres:postgres@localhost:5432/migrate_check?sslmode=disable
+  TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/livestream_test?sslmode=disable
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      # Cùng bản với docker-compose.yml
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: livestream_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install sqlc
+        uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: ${{ env.SQLC_VERSION }}
+
+      - name: Install golang-migrate
+        run: |
+          curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin migrate
+          migrate -version
+
+      - name: Format (gofmt)
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then echo "Run gofmt on:"; echo "$unformatted"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Generated sqlc code is up to date
+        run: sqlc diff
+
+      - name: Migrations go up, down, and up again
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE migrate_check"
+          migrate -path db/migration -database "$MIGRATE_DB" up
+          migrate -path db/migration -database "$MIGRATE_DB" down -all
+          migrate -path db/migration -database "$MIGRATE_DB" up
+
+      - name: Migrate test database
+        run: migrate -path db/migration -database "$TEST_DATABASE_URL" up
+
+      - name: Test (race detector)
+        run: go test -p 1 -race -count=1 ./...

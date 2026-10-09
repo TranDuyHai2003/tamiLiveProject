@@ -35,8 +35,8 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 | Bước | Tên | Sau bước này, người dùng / đội làm được gì | Trạng thái |
 |---|---|---|---|
 | 0 | Nền móng backend + luật dữ liệu tiền | (Chỉ backend) Đăng ký, phòng, chat, tặng quà; DB chặn mọi dữ liệu tiền sai | ✅ Xong |
-| **1** | **Môi trường dev và lưới an toàn** | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | 🔜 **Tiếp theo** |
-| 2 | Hợp đồng API | Frontend biết chính xác API trả gì, lỗi trông thế nào | Chờ |
+| 1 | Môi trường dev và lưới an toàn | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | ✅ Xong (chờ CI chạy lần đầu trên GitHub) |
+| **2** | **Hợp đồng API** | Frontend biết chính xác API trả gì, lỗi trông thế nào | 🔜 **Tiếp theo** |
 | 3 | Bộ khung chạy thật (MVP-1) | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | Chờ |
 | 4 | Lên staging | Thử trên điện thoại, qua mạng thật, có HTTPS | Chờ |
 | 5 | Tặng quà theo luật đã chốt | Tặng quà có hiệu ứng, rate theo host, level, quà độc quyền | Chờ |
@@ -73,7 +73,7 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 
 ---
 
-## Bước 1 — Môi trường dev và lưới an toàn 🔜
+## Bước 1 — Môi trường dev và lưới an toàn ✅
 
 **Để làm gì:** bất kỳ ai (kể cả bạn sau 3 tháng) clone repo về chạy được bằng **một lệnh**, và mọi luồng tiền có **test tự động** báo lỗi ngay khi ai đó làm hỏng.
 
@@ -94,10 +94,13 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 5. CI (GitHub Actions): `go build`, `go vet`, test, kiểm tra `sqlc generate` không tạo khác biệt, migration lên/xuống/lên. Cần đẩy repo lên GitHub.
 
 **Xong khi:**
-- [ ] Máy trống chỉ cần `make up && make migrate && make run` là server chạy
-- [ ] `make test` chạy đủ test tiền, tất cả qua
-- [ ] Cố tình phá `postLedger` (ví dụ bỏ sắp xếp) thì test báo đỏ
-- [ ] CI chạy xanh trên GitHub
+- [x] Máy trống chỉ cần `make up && make migrate && make run` là server chạy (Postgres :5440, Redis :6390, LiveKit :7980–7982)
+- [x] `make test` chạy 22 test tiền, tất cả qua (với `-race`)
+- [x] Cố tình phá code thì test báo đỏ: bỏ sắp xếp ví → deadlock 40P01; bỏ idempotency; câu SQL trừ tiền quên kiểm tra số dư (lỗi thành 500 thay vì 402); quên ghi bút toán → bất biến sổ cái báo lệch
+- [x] Rào chắn: thiếu `TEST_DATABASE_URL` hoặc trỏ vào DB không có đuôi `_test` thì từ chối chạy
+- [ ] CI chạy xanh trên GitHub *(mọi bước CI đã chạy thử trên máy; chờ push để chạy lần đầu)*
+
+**Đã chốt khi làm:** compose riêng với cổng không đụng dự án khác; LiveKit dùng 1 cổng UDP cố định và khai báo `node_ip`; test commit thật rồi xóa dữ liệu (không rollback, vì trigger cân sổ là DEFERRED); `go test -p 1 -race`; ghim sqlc v1.31.1, golang-migrate v4.20.1, Postgres 16, LiveKit v1.13.9.
 
 **Học được gì:** vì sao test tiền phải dùng DB thật; viết test đồng thời; CI là gì và chặn được gì.
 

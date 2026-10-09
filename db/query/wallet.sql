@@ -13,18 +13,19 @@ SELECT id
 FROM wallets
 WHERE account_code = $1 AND account_type <> 'USER';
 
--- Cộng/trừ số dư nguyên tử, khóa dòng ví. Ví USER không được xuống âm:
--- trả về pgx.ErrNoRows nếu không đủ số dư.
+-- Cộng/trừ số dư nguyên tử, khóa dòng ví. Ví có allow_negative = false (ví user, ví quỹ)
+-- không được xuống âm: trả về pgx.ErrNoRows nếu không đủ số dư.
+-- Điều kiện đọc cùng cột allow_negative với CHECK check_wallet_non_negative, nên hai nơi không thể lệch nhau.
 -- name: ApplyWalletCoinDelta :one
 UPDATE wallets
 SET coin = coin + sqlc.arg(delta)::bigint
-WHERE id = sqlc.arg(id) AND (account_type <> 'USER' OR coin + sqlc.arg(delta)::bigint >= 0)
+WHERE id = sqlc.arg(id) AND (allow_negative OR coin + sqlc.arg(delta)::bigint >= 0)
 RETURNING coin;
 
 -- name: ApplyWalletGemDelta :one
 UPDATE wallets
 SET gem = gem + sqlc.arg(delta)::bigint
-WHERE id = sqlc.arg(id) AND (account_type <> 'USER' OR gem + sqlc.arg(delta)::bigint >= 0)
+WHERE id = sqlc.arg(id) AND (allow_negative OR gem + sqlc.arg(delta)::bigint >= 0)
 RETURNING gem;
 
 -- name: CreateEconomyTransaction :one

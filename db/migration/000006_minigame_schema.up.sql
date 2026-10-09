@@ -30,7 +30,8 @@ CREATE TRIGGER trg_games_updated_at BEFORE UPDATE ON games
 CREATE TABLE game_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    -- RESTRICT: game đã từng được chơi thì không xóa, chỉ set games.status = 'INACTIVE'
+    game_id UUID NOT NULL REFERENCES games(id) ON DELETE RESTRICT,
     host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status game_session_status NOT NULL DEFAULT 'WAITING',
     max_players INT NOT NULL DEFAULT 4 CHECK (max_players > 0),
@@ -82,24 +83,27 @@ CREATE TRIGGER trg_game_players_updated_at BEFORE UPDATE ON game_players
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 4. Bảng game_results (Kết quả từ bên thứ ba gửi về - Chờ xác thực chữ ký trước khi trả thưởng)
+-- Đây là biên lai thưởng: mọi FK là RESTRICT. Chốt chặn đặt ở đây chứ không ở bảng cha:
+-- xóa phòng/game/session chưa từng có kết quả thì vẫn xóa được (CASCADE ở các bảng trên),
+-- nhưng nếu dây chuyền xóa chạm tới một kết quả thì cả lệnh xóa bị hủy.
 CREATE TABLE game_results (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
-    player_id UUID NOT NULL REFERENCES game_players(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE RESTRICT,
+    player_id UUID NOT NULL REFERENCES game_players(id) ON DELETE RESTRICT,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     score BIGINT NOT NULL DEFAULT 0 CHECK (score >= 0),
     reward_coin BIGINT NOT NULL DEFAULT 0 CHECK (reward_coin >= 0),
     result_payload JSONB,
     signature VARCHAR(500) NOT NULL,
     status game_result_status NOT NULL DEFAULT 'PENDING',
-    economy_transaction_id UUID REFERENCES economy_transactions(id) ON DELETE SET NULL,
+    economy_transaction_id UUID REFERENCES economy_transactions(id) ON DELETE RESTRICT,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     validated_at TIMESTAMPTZ,
     rewarded_at TIMESTAMPTZ,
 
     -- (player, session, user) phải khớp với game_players
     CONSTRAINT fk_game_result_player_identity
-        FOREIGN KEY (player_id, session_id, user_id) REFERENCES game_players(id, session_id, user_id) ON DELETE CASCADE,
+        FOREIGN KEY (player_id, session_id, user_id) REFERENCES game_players(id, session_id, user_id) ON DELETE RESTRICT,
     -- Mỗi player chỉ có 1 kết quả => không thể nhận thưởng 2 lần
     CONSTRAINT unique_game_result_player UNIQUE (player_id),
     CONSTRAINT check_game_result_rewarded

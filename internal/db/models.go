@@ -22,6 +22,7 @@ const (
 	AccountTypeSYSTEMREWARD    AccountType = "SYSTEM_REWARD"
 	AccountTypeSYSTEMESCROW    AccountType = "SYSTEM_ESCROW"
 	AccountTypeSYSTEMRESERVE   AccountType = "SYSTEM_RESERVE"
+	AccountTypeSYSTEMPROMO     AccountType = "SYSTEM_PROMO"
 )
 
 func (e *AccountType) Scan(src interface{}) error {
@@ -66,7 +67,8 @@ func (e AccountType) Valid() bool {
 		AccountTypeSYSTEMLIABILITY,
 		AccountTypeSYSTEMREWARD,
 		AccountTypeSYSTEMESCROW,
-		AccountTypeSYSTEMRESERVE:
+		AccountTypeSYSTEMRESERVE,
+		AccountTypeSYSTEMPROMO:
 		return true
 	}
 	return false
@@ -244,13 +246,15 @@ func (e EconomyTransactionStatus) Valid() bool {
 type EconomyTransactionType string
 
 const (
-	EconomyTransactionTypeTOPUP       EconomyTransactionType = "TOPUP"
-	EconomyTransactionTypeGIFTSEND    EconomyTransactionType = "GIFT_SEND"
-	EconomyTransactionTypeGIFTRECEIVE EconomyTransactionType = "GIFT_RECEIVE"
-	EconomyTransactionTypeCASHOUT     EconomyTransactionType = "CASHOUT"
-	EconomyTransactionTypeGAMEREWARD  EconomyTransactionType = "GAME_REWARD"
-	EconomyTransactionTypeREFUND      EconomyTransactionType = "REFUND"
-	EconomyTransactionTypeADJUSTMENT  EconomyTransactionType = "ADJUSTMENT"
+	EconomyTransactionTypeTOPUP          EconomyTransactionType = "TOPUP"
+	EconomyTransactionTypeGIFT           EconomyTransactionType = "GIFT"
+	EconomyTransactionTypeGAMEREWARD     EconomyTransactionType = "GAME_REWARD"
+	EconomyTransactionTypeREFUND         EconomyTransactionType = "REFUND"
+	EconomyTransactionTypeCHARGEBACK     EconomyTransactionType = "CHARGEBACK"
+	EconomyTransactionTypeCASHOUTHOLD    EconomyTransactionType = "CASHOUT_HOLD"
+	EconomyTransactionTypeCASHOUTPAYOUT  EconomyTransactionType = "CASHOUT_PAYOUT"
+	EconomyTransactionTypeCASHOUTRELEASE EconomyTransactionType = "CASHOUT_RELEASE"
+	EconomyTransactionTypeADJUSTMENT     EconomyTransactionType = "ADJUSTMENT"
 )
 
 func (e *EconomyTransactionType) Scan(src interface{}) error {
@@ -291,11 +295,13 @@ func (ns NullEconomyTransactionType) Value() (driver.Value, error) {
 func (e EconomyTransactionType) Valid() bool {
 	switch e {
 	case EconomyTransactionTypeTOPUP,
-		EconomyTransactionTypeGIFTSEND,
-		EconomyTransactionTypeGIFTRECEIVE,
-		EconomyTransactionTypeCASHOUT,
+		EconomyTransactionTypeGIFT,
 		EconomyTransactionTypeGAMEREWARD,
 		EconomyTransactionTypeREFUND,
+		EconomyTransactionTypeCHARGEBACK,
+		EconomyTransactionTypeCASHOUTHOLD,
+		EconomyTransactionTypeCASHOUTPAYOUT,
+		EconomyTransactionTypeCASHOUTRELEASE,
 		EconomyTransactionTypeADJUSTMENT:
 		return true
 	}
@@ -1323,12 +1329,13 @@ type UserSession struct {
 }
 
 type Wallet struct {
-	ID          uuid.UUID   `json:"id"`
-	UserID      *uuid.UUID  `json:"user_id"`
-	AccountType AccountType `json:"account_type"`
-	AccountCode *string     `json:"account_code"`
-	Coin        int64       `json:"coin"`
-	Gem         int64       `json:"gem"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	ID            uuid.UUID   `json:"id"`
+	UserID        *uuid.UUID  `json:"user_id"`
+	AccountType   AccountType `json:"account_type"`
+	AccountCode   *string     `json:"account_code"`
+	Coin          int64       `json:"coin"`
+	Gem           int64       `json:"gem"`
+	AllowNegative bool        `json:"allow_negative"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }

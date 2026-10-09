@@ -52,14 +52,17 @@ users ─┬─ user_sessions, follows
 
 Có 2 loại tiền: **COIN** (viewer nạp bằng tiền thật, dùng để mua quà) và **GEM** (host nhận được, dùng để rút tiền).
 
-| `account_code` | `account_type` | Ý nghĩa | Được âm? |
+Cột `wallets.allow_negative` quyết định ví nào được âm. Cả CHECK `check_wallet_non_negative` lẫn câu SQL trừ tiền (`ApplyWallet*Delta`) cùng đọc cột này, nên luật chỉ nằm ở một chỗ. CHECK `check_user_wallet_never_negative` khóa cứng: ví USER **không bao giờ** được `allow_negative = true`.
+
+| `account_code` | `account_type` | Ý nghĩa | `allow_negative` |
 |---|---|---|---|
 | *(ví user)* | `USER` | Ví của từng người dùng | **Không** |
 | `FIAT_RESERVE` | `SYSTEM_RESERVE` | Đối ứng khi phát hành COIN qua nạp tiền | Có |
 | `PLATFORM_REVENUE` | `SYSTEM_REVENUE` | COIN thu về khi user tiêu | Có |
 | `GEM_LIABILITY` | `SYSTEM_LIABILITY` | Đối ứng khi phát hành GEM cho host (nợ phải trả) | Có |
-| `SYSTEM_REWARD` | `SYSTEM_REWARD` | Nguồn thưởng (game, sự kiện) | Có |
-| `CASHOUT_ESCROW` | `SYSTEM_ESCROW` | GEM đang tạm giữ chờ rút | Có |
+| `SYSTEM_REWARD` | `SYSTEM_REWARD` | **Quỹ** thưởng còn lại (game, sự kiện). Chỉ tăng khi admin nạp từ `PROMO_BUDGET` | **Không** |
+| `PROMO_BUDGET` | `SYSTEM_PROMO` | Nguồn ngân sách khuyến mãi/thưởng. Số dư âm = tổng đã chi cho khuyến mãi | Có |
+| `CASHOUT_ESCROW` | `SYSTEM_ESCROW` | **Quỹ** GEM đang tạm giữ chờ rút | **Không** |
 | `CHARGEBACK_LOSS` *(S5, chưa làm)* | `SYSTEM_LOSS` | COIN đã bị tiêu nhưng tiền nạp bị hoàn (chargeback). Số dư âm = tổng nợ của user | Có |
 
 **Bất biến:** với mỗi currency, `SUM(số dư mọi ví) = 0` tại mọi thời điểm. Đây là phép kiểm tra sức khỏe hằng ngày nên chạy.
@@ -90,13 +93,15 @@ CHECK `check_ledger_balance_math` ép đúng công thức này.
 
 Mỗi nghiệp vụ = **1** dòng `economy_transactions` + **N** dòng `economy_ledger_entries`. Tặng quà là **một** transaction có 4 leg, không phải 2 transaction "gửi" và "nhận".
 
-**Vì sao chargeback không làm ví âm:** `check_user_wallet_non_negative` là thứ đảm bảo không ai tiêu quá số dư, kể cả khi nhiều request chạy song song. Phần nợ nằm ở ví hệ thống `CHARGEBACK_LOSS` (trong sổ cái) và được ghi thêm vào `users.coin_debt` (để kiểm tra nhanh), thay vì để ví user âm. Nhờ đó bảo đảm trên vẫn giữ nguyên cho mọi luồng khác, `FIAT_RESERVE` luôn khớp với số tiền thật đã thu, và khoản nợ có dấu vết đầy đủ trong sổ cái.
+**Vì sao chargeback không làm ví âm:** `check_user_wallet_never_negative` + `check_wallet_non_negative` là thứ đảm bảo không ai tiêu quá số dư, kể cả khi nhiều request chạy song song. Phần nợ nằm ở ví hệ thống `CHARGEBACK_LOSS` (trong sổ cái) và được ghi thêm vào `users.coin_debt` (để kiểm tra nhanh), thay vì để ví user âm. Nhờ đó bảo đảm trên vẫn giữ nguyên cho mọi luồng khác, `FIAT_RESERVE` luôn khớp với số tiền thật đã thu, và khoản nợ có dấu vết đầy đủ trong sổ cái.
 
 Bất biến đi kèm: `−CHARGEBACK_LOSS.coin = SUM(users.coin_debt)` (xem phép đối soát ở §6).
 
 ### 3.4 Bảo vệ ở tầng DB (đã có)
 
-- `check_user_wallet_non_negative` — ví USER không âm.
+- `check_wallet_non_negative` — ví có `allow_negative = false` (ví user, ví quỹ) không âm.
+- `check_user_wallet_never_negative` — ví USER không bao giờ được bật `allow_negative`.
+- `check_refund_has_reference` + `idx_eco_tx_refund_once` — hoàn tiền phải chỉ rõ giao dịch gốc, mỗi giao dịch gốc chỉ hoàn một lần.
 - `check_wallet_owner` — ví USER có `user_id`, ví SYSTEM có `account_code`.
 - `trg_ledger_immutable` — sổ cái append-only, cấm UPDATE/DELETE.
 - `trg_ledger_balanced` (constraint trigger, `DEFERRABLE INITIALLY DEFERRED`) — lúc COMMIT, mỗi transaction phải cân theo từng currency.
@@ -201,12 +206,12 @@ Danh sách này suy ra từ [BUSINESS.md §9](BUSINESS.md). Đánh số S1–S13
 | S4 | `gifts.min_level INT NOT NULL DEFAULT 0 CHECK (min_level >= 0)` | 000004 | Quà độc quyền theo level |
 | S5 | Enum `user_status` thêm `RESTRICTED`; `users.coin_debt BIGINT NOT NULL DEFAULT 0 CHECK (coin_debt >= 0)`; `users.chargeback_count INT NOT NULL DEFAULT 0`, `users.last_chargeback_at TIMESTAMPTZ`; CHECK: `coin_debt > 0` ⇒ `status IN ('RESTRICTED','BANNED','SUSPENDED','DELETED')`. Enum `account_type` thêm `SYSTEM_LOSS` và seed ví `('SYSTEM_LOSS', 'CHARGEBACK_LOSS')` | 000001, 000002 | Chargeback mà không làm ví âm; nợ có dấu vết trong sổ cái |
 | S6 | `coin_packages (id, channel ENUM('WEB','IOS','ANDROID'), store_product_id, price_amount, price_currency, coin_amount, is_active)`; `topup_orders (id, user_id, package_id, channel, amount_fiat, provider, provider_txn_id UNIQUE, status, economy_transaction_id, created_at, completed_at)` | 000002 | Bảng giá theo kênh, nạp qua webhook |
-| S7 | Enum `economy_transaction_type`: `TOPUP`, `GIFT`, `GAME_REWARD`, `REFUND`, `CHARGEBACK`, `CASHOUT_HOLD`, `CASHOUT_PAYOUT`, `CASHOUT_RELEASE`, `ADJUSTMENT` (bỏ `GIFT_SEND`/`GIFT_RECEIVE`/`CASHOUT`). Partial unique index `(reference_id) WHERE type = 'REFUND'` để mỗi giao dịch gốc chỉ hoàn một lần | 000002 | D1; hoàn tiền tối đa 1 lần |
+| S7 ✅ | Enum `economy_transaction_type`: `TOPUP`, `GIFT`, `GAME_REWARD`, `REFUND`, `CHARGEBACK`, `CASHOUT_HOLD`, `CASHOUT_PAYOUT`, `CASHOUT_RELEASE`, `ADJUSTMENT` (bỏ `GIFT_SEND`/`GIFT_RECEIVE`/`CASHOUT`). Partial unique index `(reference_id) WHERE type = 'REFUND'` để mỗi giao dịch gốc chỉ hoàn một lần | 000002 | D1; hoàn tiền tối đa 1 lần |
 | S8 | Enum `pk_status` thêm `PUNISHMENT` (`CANCELLED` đã có). `pk_battles` thêm `duration_seconds INT NOT NULL`, `ends_at TIMESTAMPTZ`, `punishment_ends_at TIMESTAMPTZ`, `end_reason` (`SCORE`, `DRAW`, `TKO`, `CANCELLED`). **Sửa** `check_pk_winner_only_finished` → `winner_side_id IS NULL OR status IN ('PUNISHMENT','FINISHED')`; `check_pk_ended_at` cũng áp cho `PUNISHMENT`. **Thêm** CHECK khớp kết quả: `end_reason IS NULL` khi chưa chốt; `SCORE`/`TKO` ⇒ `winner_side_id IS NOT NULL`; `DRAW`/`CANCELLED` ⇒ `winner_side_id IS NULL`; `status = 'CANCELLED'` ⇔ `end_reason = 'CANCELLED'`. Bảng phụ hoặc cột `pk_side_rooms.disconnected_at` để job biết phòng nào đang trong 30 giây chờ | 000005 | Phase phạt, xử thua TKO, job chốt trận theo `ends_at` |
 | S9 | Bảng `host_pk_stats (user_id PK REFERENCES users, win_streak, max_win_streak, wins, losses, draws, updated_at)`, cập nhật trong cùng transaction chốt trận | 000005 | Chuỗi thắng. Tách bảng riêng thay vì thêm cột vào `users`, vì chỉ host dùng và cập nhật thường xuyên |
 | S10 | `cashout_requests` thêm `gross_amount_vnd`, `tax_amount_vnd`, `net_amount_vnd` (BIGINT), `vnd_per_gem` (snapshot tỷ giá); CHECK `net = gross - tax`. KYC host (bảng `host_kyc`) để giai đoạn 2 | 000002 | Rút tiền và thuế (chờ kế toán) |
-| S11 | D2: đổi `ON DELETE CASCADE` → `RESTRICT` cho FK từ bảng biên lai (`gift_logs`, `game_results`, `topup_orders`, `cashout_requests`) trỏ tới `users`, `rooms`, `gifts`, `games`, `economy_transactions` | 000002–000006 | Không mất biên lai khi xóa quà/game/phòng |
-| S12 | Mở rộng ràng buộc không âm cho ví hệ thống có ngân sách: `CHECK (account_type NOT IN ('USER','SYSTEM_REWARD','SYSTEM_ESCROW') OR (coin >= 0 AND gem >= 0))` (thay cho `check_user_wallet_non_negative`) | 000002 | Ngân sách thưởng game có giới hạn; escrow không bao giờ âm |
+| S11 ✅ | D2: đổi `ON DELETE CASCADE` → `RESTRICT` cho FK từ bảng biên lai: `wallets.user_id`; 5 FK của `gift_logs`; 5 FK của `game_results`; `game_sessions.game_id`; `inventories.item_id`. *(`topup_orders`, `cashout_requests` tạo sau ở S6/S10 cũng phải theo luật này)* | 000002, 000004, 000006 | Không mất biên lai khi xóa quà/game/phòng |
+| S12 ✅ | Cột `wallets.allow_negative` + `check_wallet_non_negative` + `check_user_wallet_never_negative`; query trừ tiền đọc cùng cột. Ví mới `PROMO_BUDGET` (`SYSTEM_PROMO`, được âm) làm nguồn nạp quỹ thưởng | 000002 | Ngân sách thưởng game có giới hạn; escrow không bao giờ âm |
 | S13 | `games.webhook_secret_hash` (hoặc tham chiếu tới secret manager) + `games.allowed_ips`; bảng `game_reward_rules (game_id, rank_from, rank_to, reward_coin)`; `games.max_reward_per_result`, `max_reward_per_user_per_day`, `max_reward_per_day`. `game_results` dùng đủ luồng `PENDING → VALIDATED/REJECTED → REWARDED` | 000006 | Backend tự tính thưởng, có trần, secret riêng từng provider |
 
 **Code phải sửa theo:**
@@ -218,18 +223,7 @@ Danh sách này suy ra từ [BUSINESS.md §9](BUSINESS.md). Đánh số S1–S13
 - API mới: kick thành viên (xem BUSINESS §3), `GET /rooms/:id/messages?after=` để lấy lại tin bị lỡ.
 - Vận hành: khi tắt server, gửi close frame cho mọi WebSocket (`http.Server.Shutdown` không quản lý kết nối đã hijack); log có cấu trúc cả các lỗi 4xx của luồng tiền.
 
-**Thứ tự triển khai** (mỗi nhóm: sửa migration gốc → `migrate down -all` → `up` → `sqlc generate` → `go build`):
-
-| Nhóm | Gồm | Ghi chú |
-|---|---|---|
-| 1 | S7, S11, S12 | Nền tảng: enum loại giao dịch, CASCADE → RESTRICT, ví hệ thống có ngân sách không được âm |
-| 2 | S1, S3, S5, S4, S2 | Cột cho user và quà, ví `CHARGEBACK_LOSS` |
-| 3 | S8, S9 | PK |
-| 4 | S13 | Thưởng game an toàn (trước khi tích hợp provider thật) |
-| 5 | S6 | Nạp tiền, cần cho MVP-2 |
-| 6 | S10 | Rút tiền, giai đoạn 2 |
-
-Sau đó sửa code: `SendGift` → `EndRoom` và chốt trận PK → các job.
+**Thứ tự triển khai:** xem [ROADMAP.md](ROADMAP.md) (phase 1: S7, S11, S12 · phase 2: S1–S5 · phase 3: S6 · phase 5: S8, S9 · phase 6: S13 · phase 7: S10).
 
 ## 6. Quy trình làm việc với DB
 

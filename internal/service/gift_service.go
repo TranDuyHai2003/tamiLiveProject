@@ -154,7 +154,7 @@ func (s *GiftService) SendGift(ctx context.Context, in SendGiftInput) (SendGiftR
 			"quantity":    in.Quantity,
 		})
 		txID, err := q.CreateEconomyTransaction(ctx, db.CreateEconomyTransactionParams{
-			Type:           db.EconomyTransactionTypeGIFTSEND,
+			Type:           db.EconomyTransactionTypeGIFT,
 			ReferenceType:  ptr("GIFT"),
 			ReferenceID:    &gift.ID,
 			IdempotencyKey: &in.IdempotencyKey,

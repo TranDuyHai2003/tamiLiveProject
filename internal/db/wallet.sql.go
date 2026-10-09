@@ -15,7 +15,7 @@ import (
 const applyWalletCoinDelta = `-- name: ApplyWalletCoinDelta :one
 UPDATE wallets
 SET coin = coin + $1::bigint
-WHERE id = $2 AND (account_type <> 'USER' OR coin + $1::bigint >= 0)
+WHERE id = $2 AND (allow_negative OR coin + $1::bigint >= 0)
 RETURNING coin
 `
 
@@ -24,8 +24,9 @@ type ApplyWalletCoinDeltaParams struct {
 	ID    uuid.UUID `json:"id"`
 }
 
-// Cộng/trừ số dư nguyên tử, khóa dòng ví. Ví USER không được xuống âm:
-// trả về pgx.ErrNoRows nếu không đủ số dư.
+// Cộng/trừ số dư nguyên tử, khóa dòng ví. Ví có allow_negative = false (ví user, ví quỹ)
+// không được xuống âm: trả về pgx.ErrNoRows nếu không đủ số dư.
+// Điều kiện đọc cùng cột allow_negative với CHECK check_wallet_non_negative, nên hai nơi không thể lệch nhau.
 func (q *Queries) ApplyWalletCoinDelta(ctx context.Context, arg ApplyWalletCoinDeltaParams) (int64, error) {
 	row := q.db.QueryRow(ctx, applyWalletCoinDelta, arg.Delta, arg.ID)
 	var coin int64
@@ -36,7 +37,7 @@ func (q *Queries) ApplyWalletCoinDelta(ctx context.Context, arg ApplyWalletCoinD
 const applyWalletGemDelta = `-- name: ApplyWalletGemDelta :one
 UPDATE wallets
 SET gem = gem + $1::bigint
-WHERE id = $2 AND (account_type <> 'USER' OR gem + $1::bigint >= 0)
+WHERE id = $2 AND (allow_negative OR gem + $1::bigint >= 0)
 RETURNING gem
 `
 

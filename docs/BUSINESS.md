@@ -21,7 +21,7 @@
 
 ## 1. Lộ trình triển khai
 
-Làm theo thứ tự — mỗi giai đoạn chạy được end-to-end trước khi sang giai đoạn sau.
+Làm theo thứ tự — mỗi giai đoạn chạy được end-to-end trước khi sang giai đoạn sau. Các phase kỹ thuật để đạt từng giai đoạn xem [ROADMAP.md](ROADMAP.md).
 
 | Giai đoạn | Phạm vi | Xong khi |
 |---|---|---|
@@ -213,7 +213,7 @@ Trong **một DB transaction** (`GiftService.SendGift`):
    - Lần 2 trong vòng 180 ngày, **hoặc** nợ ≥ 100.000 COIN (≈ 1 triệu đồng): `BANNED`.
 5. **Host không bị trừ GEM.** Khoản thất thoát ghi nhận là chi phí rủi ro (fraud loss).
 
-> Vì sao không cho ví âm: ràng buộc `check_user_wallet_non_negative` là thứ đảm bảo không ai tiêu quá số dư (kể cả khi 2 request chạy song song). Nới nó ra cho chargeback sẽ mở lỗ hổng cho mọi luồng khác. Ghi nợ ở cột riêng giữ nguyên được bảo đảm đó.
+> Vì sao không cho ví âm: ràng buộc `check_user_wallet_never_negative` (ví USER không bao giờ được âm) là thứ đảm bảo không ai tiêu quá số dư (kể cả khi 2 request chạy song song). Nới nó ra cho chargeback sẽ mở lỗ hổng cho mọi luồng khác. Ghi nợ ở cột riêng giữ nguyên được bảo đảm đó.
 
 ## 6. PK Battle
 
@@ -297,7 +297,7 @@ Chữ ký HMAC chỉ trả lời "tin này đến từ ai", không trả lời "
 |---|---|---|
 | Nghiệp vụ (chính) | **Backend tự quyết số thưởng**: game server chỉ báo thứ hạng/điểm; backend tra bảng thưởng của từng game (`game_reward_rules`) ra số COIN | Chặn từ gốc |
 | Nghiệp vụ | **Trần thưởng**: mỗi kết quả, mỗi phiên, mỗi user/ngày, mỗi game/ngày. Vượt trần → kết quả ở `PENDING`, chờ admin duyệt (`VALIDATED`/`REJECTED`), không trả ngay | Giới hạn mỗi lần bị lạm dụng |
-| Sổ cái (lưới an toàn) | **`SYSTEM_REWARD` không được âm.** Admin nạp ngân sách định kỳ bằng giao dịch `ADJUSTMENT`: `PLATFORM_REVENUE` −X → `SYSTEM_REWARD` +X (nền tảng chi thưởng từ doanh thu của mình). Hết ngân sách thì DB tự chặn | Thiệt hại tối đa = ngân sách còn lại, kể cả khi code có bug |
+| Sổ cái (lưới an toàn) | **`SYSTEM_REWARD` không được âm.** Admin nạp ngân sách định kỳ bằng giao dịch `ADJUSTMENT`: `PROMO_BUDGET` −X → `SYSTEM_REWARD` +X. Tách ví `PROMO_BUDGET` để doanh thu (`PLATFORM_REVENUE`) không bị lẫn với chi phí khuyến mãi. Hết ngân sách thì DB tự chặn *(đã làm ở phase 1; dev nạp bằng `db/scripts/dev_fund_reward_budget.sql`)* | Thiệt hại tối đa = ngân sách còn lại, kể cả khi code có bug |
 | Xác thực | **Mỗi provider một secret riêng**, xoay vòng được; danh sách IP được phép gọi webhook | Lộ một secret không ảnh hưởng game khác |
 | Giám sát | Cảnh báo khi tổng thưởng/giờ tăng bất thường hoặc một user nhận thưởng liên tục; đối soát sổ cái hằng ngày | Phát hiện nhanh |
 

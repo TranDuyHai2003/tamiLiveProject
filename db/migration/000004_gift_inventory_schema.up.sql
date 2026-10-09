@@ -28,7 +28,8 @@ CREATE TABLE inventories (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     item_type inventory_item_type NOT NULL DEFAULT 'GIFT',
-    item_id UUID NOT NULL REFERENCES gifts(id) ON DELETE CASCADE,
+    -- RESTRICT: xóa quà khỏi danh mục không được làm mất quà user đã mua vào kho
+    item_id UUID NOT NULL REFERENCES gifts(id) ON DELETE RESTRICT,
     quantity BIGINT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -42,14 +43,16 @@ CREATE TRIGGER trg_inventories_updated_at BEFORE UPDATE ON inventories
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 3. Bảng gift_logs (Biên lai / Nhật ký sự kiện tặng quà)
--- Gắn kết giữa Người gửi, Người nhận, Phòng live, Quà và Giao dịch tài chính
+-- Gắn kết giữa Người gửi, Người nhận, Phòng live, Quà và Giao dịch tài chính.
+-- Biên lai tài chính không bao giờ được biến mất: mọi FK là RESTRICT.
+-- Muốn bỏ một món quà thì set gifts.is_active = false, không DELETE.
 CREATE TABLE gift_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    gift_id UUID NOT NULL REFERENCES gifts(id) ON DELETE CASCADE,
-    economy_transaction_id UUID NOT NULL REFERENCES economy_transactions(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE RESTRICT,
+    gift_id UUID NOT NULL REFERENCES gifts(id) ON DELETE RESTRICT,
+    economy_transaction_id UUID NOT NULL REFERENCES economy_transactions(id) ON DELETE RESTRICT,
     quantity BIGINT NOT NULL CHECK (quantity > 0),
     total_coin BIGINT NOT NULL CHECK (total_coin >= 0),
     total_gem BIGINT NOT NULL DEFAULT 0 CHECK (total_gem >= 0),

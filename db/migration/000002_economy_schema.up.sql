@@ -4,8 +4,20 @@
 
 -- 1. Khởi tạo các Enum cho Economy
 CREATE TYPE currency_type AS ENUM ('COIN', 'GEM');
-CREATE TYPE account_type AS ENUM ('USER', 'SYSTEM_REVENUE', 'SYSTEM_LIABILITY', 'SYSTEM_REWARD', 'SYSTEM_ESCROW', 'SYSTEM_RESERVE');
-CREATE TYPE economy_transaction_type AS ENUM ('TOPUP', 'GIFT_SEND', 'GIFT_RECEIVE', 'CASHOUT', 'GAME_REWARD', 'REFUND', 'ADJUSTMENT');
+CREATE TYPE account_type AS ENUM ('USER', 'SYSTEM_REVENUE', 'SYSTEM_LIABILITY', 'SYSTEM_REWARD', 'SYSTEM_ESCROW', 'SYSTEM_RESERVE', 'SYSTEM_PROMO');
+-- Mỗi giá trị = một sự kiện nghiệp vụ = một economy_transaction (có thể nhiều bút toán).
+-- Rút tiền gồm 3 sự kiện ở 3 thời điểm khác nhau nên có 3 loại riêng.
+CREATE TYPE economy_transaction_type AS ENUM (
+    'TOPUP',           -- nạp tiền
+    'GIFT',            -- tặng quà (1 giao dịch, 4 bút toán)
+    'GAME_REWARD',     -- thưởng mini game
+    'REFUND',          -- admin hoàn coin do lỗi hệ thống
+    'CHARGEBACK',      -- store/ngân hàng ép hoàn tiền nạp
+    'CASHOUT_HOLD',    -- host yêu cầu rút: giữ GEM vào escrow
+    'CASHOUT_PAYOUT',  -- đã chuyển khoản: xóa nợ GEM
+    'CASHOUT_RELEASE', -- từ chối/thất bại: trả GEM cho host
+    'ADJUSTMENT'       -- điều chỉnh thủ công, VD nạp ngân sách thưởng
+);
 CREATE TYPE economy_transaction_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED');
 CREATE TYPE ledger_entry_type AS ENUM ('DEBIT', 'CREDIT');
 CREATE TYPE idempotency_status AS ENUM ('PROCESSING', 'COMPLETED', 'FAILED');
@@ -14,11 +26,16 @@ CREATE TYPE cashout_status AS ENUM ('REQUESTED', 'PROCESSING', 'COMPLETED', 'FAI
 -- 2. Bảng wallets (Tài khoản ví cá nhân và ví hệ thống)
 CREATE TABLE wallets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    -- RESTRICT: ví là dữ liệu tài chính, không bao giờ bị xóa theo user (user chỉ xóa mềm)
+    user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
     account_type account_type NOT NULL,
     account_code VARCHAR(100) UNIQUE,
     coin BIGINT NOT NULL DEFAULT 0,
     gem BIGINT NOT NULL DEFAULT 0,
+    -- true  = ví PHÁT HÀNH / đối ứng: âm là trạng thái tự nhiên (VD FIAT_RESERVE âm = tổng COIN đã bán ra)
+    -- false = ví QUỸ hoặc ví user: số dư là tiền thật đang có, không được âm
+    -- Câu SQL trừ tiền (ApplyWallet*Delta) đọc chính cột này, nên luật chỉ nằm ở một chỗ.
+    allow_negative BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -27,11 +44,15 @@ CREATE TABLE wallets (
         (account_type = 'USER' AND user_id IS NOT NULL AND account_code IS NULL) OR
         (account_type != 'USER' AND user_id IS NULL AND account_code IS NOT NULL)
     ),
-    -- Ví USER không được âm. Ví SYSTEM là tài khoản đối ứng nên được phép âm
-    -- (VD: FIAT_RESERVE âm = tổng COIN đã phát hành qua nạp tiền).
-    -- Bất biến: với mỗi currency, tổng số dư của mọi ví luôn = 0.
-    CONSTRAINT check_user_wallet_non_negative CHECK (
-        account_type <> 'USER' OR (coin >= 0 AND gem >= 0)
+    -- Ví không được âm thì số dư luôn >= 0.
+    -- Bất biến toàn hệ thống: với mỗi currency, tổng số dư của mọi ví luôn = 0.
+    CONSTRAINT check_wallet_non_negative CHECK (
+        allow_negative OR (coin >= 0 AND gem >= 0)
+    ),
+    -- Khóa cứng: ví USER KHÔNG BAO GIỜ được âm, kể cả khi ai đó lỡ UPDATE cột allow_negative.
+    -- Đây là chốt chặn chống tiêu quá số dư (double-spend).
+    CONSTRAINT check_user_wallet_never_negative CHECK (
+        account_type <> 'USER' OR NOT allow_negative
     )
 );
 
@@ -43,12 +64,21 @@ CREATE TRIGGER trg_wallets_updated_at BEFORE UPDATE ON wallets
 
 -- 3. Seed các System Accounts mặc định ngay khi khởi tạo Database
 -- Giúp hệ thống luôn có địa chỉ hạch toán cố định cho các bút toán kế toán kép
-INSERT INTO wallets (account_type, account_code, coin, gem) VALUES
-('SYSTEM_REVENUE', 'PLATFORM_REVENUE', 0, 0),
-('SYSTEM_LIABILITY', 'GEM_LIABILITY', 0, 0),
-('SYSTEM_REWARD', 'SYSTEM_REWARD', 0, 0),
-('SYSTEM_ESCROW', 'CASHOUT_ESCROW', 0, 0),
-('SYSTEM_RESERVE', 'FIAT_RESERVE', 0, 0);
+--   Ví phát hành / đối ứng (được âm):
+--     FIAT_RESERVE     âm = tổng COIN đã bán ra
+--     GEM_LIABILITY    âm = tổng GEM đang nợ host
+--     PLATFORM_REVENUE âm = đã chi (hoàn tiền) nhiều hơn đã thu; cho âm để luôn hoàn được tiền khi nền tảng gây lỗi
+--     PROMO_BUDGET     âm = tổng đã chi cho khuyến mãi/thưởng
+--   Ví quỹ (không được âm):
+--     SYSTEM_REWARD    quỹ thưởng còn lại; chỉ tăng khi admin nạp từ PROMO_BUDGET (ADJUSTMENT)
+--     CASHOUT_ESCROW   GEM đang tạm giữ chờ rút
+INSERT INTO wallets (account_type, account_code, coin, gem, allow_negative) VALUES
+('SYSTEM_REVENUE',   'PLATFORM_REVENUE', 0, 0, TRUE),
+('SYSTEM_LIABILITY', 'GEM_LIABILITY',    0, 0, TRUE),
+('SYSTEM_REWARD',    'SYSTEM_REWARD',    0, 0, FALSE),
+('SYSTEM_ESCROW',    'CASHOUT_ESCROW',   0, 0, FALSE),
+('SYSTEM_RESERVE',   'FIAT_RESERVE',     0, 0, TRUE),
+('SYSTEM_PROMO',     'PROMO_BUDGET',     0, 0, TRUE);
 
 -- 4. Bảng economy_transactions (Ghi nhận nghiệp vụ tài chính tổng thể)
 CREATE TABLE economy_transactions (
@@ -66,12 +96,18 @@ CREATE TABLE economy_transactions (
     completed_at TIMESTAMPTZ,
 
     -- Giao dịch COMPLETED phải có completed_at
-    CONSTRAINT check_eco_tx_completed_at CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL)
+    CONSTRAINT check_eco_tx_completed_at CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL),
+    -- Hoàn tiền phải chỉ rõ giao dịch gốc được hoàn
+    CONSTRAINT check_refund_has_reference CHECK (
+        type <> 'REFUND' OR (reference_type IS NOT NULL AND reference_id IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_eco_tx_type ON economy_transactions(type);
 CREATE INDEX idx_eco_tx_status ON economy_transactions(status);
 CREATE INDEX idx_eco_tx_ref ON economy_transactions(reference_type, reference_id);
+-- Mỗi giao dịch gốc chỉ được hoàn tiền MỘT lần (admin lỡ bấm "Hoàn" 2 lần thì lần sau bị chặn)
+CREATE UNIQUE INDEX idx_eco_tx_refund_once ON economy_transactions(reference_id) WHERE type = 'REFUND';
 
 CREATE TRIGGER trg_economy_transactions_updated_at BEFORE UPDATE ON economy_transactions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"livestream-backend/internal/db"
@@ -263,6 +264,11 @@ func (s *MiniGameService) SubmitResult(ctx context.Context, in GameResultInput) 
 			{WalletID: rewardWallet, Currency: db.CurrencyTypeCOIN, Delta: -in.RewardCoin, Description: "game reward issued"},
 			{WalletID: userWallet, Currency: db.CurrencyTypeCOIN, Delta: in.RewardCoin, Description: "game reward"},
 		})
+		if errors.Is(err, ErrInsufficientBalance) {
+			// Ví bị trừ duy nhất là SYSTEM_REWARD (không được âm): hết ngân sách thưởng.
+			// Rollback cả kết quả, nên provider gửi lại được sau khi admin nạp thêm ngân sách.
+			return fmt.Errorf("%w: game reward budget exhausted", ErrInsufficientBalance)
+		}
 		if err != nil {
 			return err
 		}

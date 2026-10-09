@@ -72,7 +72,8 @@ func postLedger(ctx context.Context, q *db.Queries, txID uuid.UUID, legs []ledge
 			return nil, fmt.Errorf("unsupported currency %q", leg.Currency)
 		}
 		if isNoRows(err) {
-			// Câu UPDATE chỉ không khớp dòng nào khi ví USER không đủ số dư
+			// Câu UPDATE chỉ không khớp dòng nào khi ví không được âm (allow_negative = false:
+			// ví user hoặc ví quỹ như SYSTEM_REWARD) không đủ số dư
 			return nil, fmt.Errorf("%w: not enough %s", ErrInsufficientBalance, leg.Currency)
 		}
 		if err != nil {

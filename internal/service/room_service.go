@@ -209,7 +209,9 @@ func (s *RoomService) EnsureCanChat(ctx context.Context, roomID, userID uuid.UUI
 func (s *RoomService) liveKitToken(roomName, identity, name string, canPublish bool) (string, error) {
 	grant := &livekit.VideoGrant{RoomJoin: true, Room: roomName}
 	grant.SetCanPublish(canPublish)
-	grant.SetCanPublishData(true)
+	// Data message của LiveKit không đi qua backend (không kiểm tra kick/ban/độ dài),
+	// nên viewer không được gửi; chat của viewer phải đi qua WebSocket.
+	grant.SetCanPublishData(canPublish)
 	grant.SetCanSubscribe(true)
 
 	token, err := livekit.NewAccessToken(s.apiKey, s.apiSecret).

@@ -1153,6 +1153,7 @@ type GameResult struct {
 	PlayerID             uuid.UUID        `json:"player_id"`
 	UserID               uuid.UUID        `json:"user_id"`
 	Score                int64            `json:"score"`
+	RewardCoin           int64            `json:"reward_coin"`
 	ResultPayload        []byte           `json:"result_payload"`
 	Signature            string           `json:"signature"`
 	Status               GameResultStatus `json:"status"`
@@ -1160,7 +1161,6 @@ type GameResult struct {
 	SubmittedAt          time.Time        `json:"submitted_at"`
 	ValidatedAt          *time.Time       `json:"validated_at"`
 	RewardedAt           *time.Time       `json:"rewarded_at"`
-	RewardCoin           int64            `json:"reward_coin"`
 }
 
 type GameSession struct {

@@ -20,6 +20,9 @@ CREATE TABLE gifts (
 
 CREATE INDEX idx_gifts_is_active ON gifts(is_active);
 
+CREATE TRIGGER trg_gifts_updated_at BEFORE UPDATE ON gifts
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- 2. Bảng inventories (Kho đồ vật phẩm của người dùng)
 CREATE TABLE inventories (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -35,6 +38,9 @@ CREATE TABLE inventories (
 CREATE INDEX idx_inventories_user ON inventories(user_id);
 CREATE INDEX idx_inventories_item ON inventories(item_type, item_id);
 
+CREATE TRIGGER trg_inventories_updated_at BEFORE UPDATE ON inventories
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- 3. Bảng gift_logs (Biên lai / Nhật ký sự kiện tặng quà)
 -- Gắn kết giữa Người gửi, Người nhận, Phòng live, Quà và Giao dịch tài chính
 CREATE TABLE gift_logs (
@@ -47,7 +53,10 @@ CREATE TABLE gift_logs (
     quantity BIGINT NOT NULL CHECK (quantity > 0),
     total_coin BIGINT NOT NULL CHECK (total_coin >= 0),
     total_gem BIGINT NOT NULL DEFAULT 0 CHECK (total_gem >= 0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Không tự tặng quà cho chính mình
+    CONSTRAINT check_gift_not_self CHECK (sender_id <> receiver_id)
 );
 
 CREATE INDEX idx_gift_logs_sender ON gift_logs(sender_id);

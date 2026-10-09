@@ -19,13 +19,25 @@ CREATE TABLE rooms (
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Mốc thời gian phải khớp trạng thái
+    CONSTRAINT check_room_started_at CHECK (status NOT IN ('LIVE', 'ENDED') OR started_at IS NOT NULL),
+    CONSTRAINT check_room_ended_at CHECK (status <> 'ENDED' OR ended_at IS NOT NULL),
+    CONSTRAINT check_room_time_order CHECK (ended_at IS NULL OR started_at IS NULL OR ended_at >= started_at),
+    -- Khóa phụ để bảng khác (pk_side_rooms, game_sessions) ràng buộc cặp (room_id, host_id) đúng chủ phòng
+    CONSTRAINT unique_room_host UNIQUE (id, host_id)
 );
 
 CREATE INDEX idx_rooms_host_id ON rooms(host_id);
 CREATE INDEX idx_rooms_status ON rooms(status);
 CREATE INDEX idx_rooms_category ON rooms(category);
 CREATE INDEX idx_rooms_created_at ON rooms(created_at);
+-- Mỗi host chỉ có tối đa 1 phòng đang LIVE
+CREATE UNIQUE INDEX idx_rooms_one_live_per_host ON rooms (host_id) WHERE status = 'LIVE';
+
+CREATE TRIGGER trg_rooms_updated_at BEFORE UPDATE ON rooms
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 2. Bảng room_members (Lịch sử thành viên tham gia phòng live)
 CREATE TABLE room_members (
@@ -51,7 +63,10 @@ CREATE TABLE chat_messages (
     message TEXT NOT NULL,
     reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ
+    deleted_at TIMESTAMPTZ,
+
+    -- Nội dung chat không rỗng, giới hạn độ dài
+    CONSTRAINT check_chat_message_length CHECK (char_length(message) BETWEEN 1 AND 1000)
 );
 
 CREATE INDEX idx_chat_messages_room_time ON chat_messages(room_id, created_at);
@@ -68,3 +83,6 @@ CREATE TABLE room_reaction_stats (
 );
 
 CREATE INDEX idx_reaction_stats_room ON room_reaction_stats(room_id);
+
+CREATE TRIGGER trg_room_reaction_stats_updated_at BEFORE UPDATE ON room_reaction_stats
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();

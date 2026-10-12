@@ -113,6 +113,25 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
 
   /rooms:
+    get:
+      tags: [rooms]
+      summary: Danh sách phòng đang live (mới lên sóng trước)
+      description: Public, không cần đăng nhập. Phân trang bằng cursor theo quy ước chung.
+      security: []
+      parameters:
+        - name: status
+          in: query
+          description: Hiện chỉ hỗ trợ LIVE (mặc định).
+          schema: { type: string, enum: [LIVE] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Một trang phòng
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomPage' }
+        '422': { $ref: '#/components/responses/ValidationError' }
     post:
       tags: [rooms]
       summary: Mở phòng live (user đang đăng nhập là host)
@@ -420,6 +439,16 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      description: Số phần tử mỗi trang (mặc định 20).
+      schema: { type: integer, minimum: 1, maximum: 100 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Lấy từ `next_cursor` của trang trước. Chuỗi mờ, client không tự tạo.
+      schema: { type: string }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -501,6 +530,7 @@ components:
                 - USERNAME_TAKEN
                 - EMAIL_TAKEN
                 - INTERNAL
+                - NOT_READY
             message:
               type: string
               description: Mô tả cho người đọc log. Không dùng để rẽ nhánh logic.
@@ -595,13 +625,41 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    RoomSummary:
+      type: object
+      required: [id, title, category, host_id, host_username, started_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        category: { type: string, nullable: true }
+        host_id: { type: string, format: uuid }
+        host_username: { type: string }
+        started_at: { type: string, format: date-time }
+
+    RoomPage:
+      type: object
+      required: [data, next_cursor]
+      additionalProperties: false
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/RoomSummary' }
+        next_cursor:
+          type: string
+          nullable: true
+          description: null khi đã hết trang.
+
     JoinRoomResult:
       type: object
-      required: [room, role, livekit_token]
+      required: [room, role, livekit_url, livekit_token]
       additionalProperties: false
       properties:
         room: { $ref: '#/components/schemas/Room' }
         role: { type: string, enum: [VIEWER, HOST, CO_HOST, MODERATOR] }
+        livekit_url:
+          type: string
+          description: Địa chỉ LiveKit để client kết nối (VD ws://localhost:7980).
         livekit_token:
           type: string
           description: JWT để kết nối LiveKit. HOST/CO_HOST được phát hình; VIEWER chỉ xem.

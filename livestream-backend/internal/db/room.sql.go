@@ -233,3 +233,59 @@ func (q *Queries) LeaveRoom(ctx context.Context, arg LeaveRoomParams) error {
 	_, err := q.db.Exec(ctx, leaveRoom, arg.RoomID, arg.UserID)
 	return err
 }
+
+const listLiveRooms = `-- name: ListLiveRooms :many
+SELECT r.id, r.title, r.category, r.host_id, u.username AS host_username, r.started_at
+FROM rooms r
+JOIN users u ON u.id = r.host_id
+WHERE r.status = 'LIVE'
+  AND ($1::timestamptz IS NULL
+       OR (r.started_at, r.id) < ($1::timestamptz, $2::uuid))
+ORDER BY r.started_at DESC, r.id DESC
+LIMIT $3
+`
+
+type ListLiveRoomsParams struct {
+	CursorStartedAt *time.Time `json:"cursor_started_at"`
+	CursorID        *uuid.UUID `json:"cursor_id"`
+	RowLimit        int32      `json:"row_limit"`
+}
+
+type ListLiveRoomsRow struct {
+	ID           uuid.UUID  `json:"id"`
+	Title        string     `json:"title"`
+	Category     *string    `json:"category"`
+	HostID       uuid.UUID  `json:"host_id"`
+	HostUsername string     `json:"host_username"`
+	StartedAt    *time.Time `json:"started_at"`
+}
+
+// Phân trang bằng cursor (keyset): lấy các phòng "sau" phòng cuối của trang trước theo thứ tự
+// (started_at, id) giảm dần. Không dùng OFFSET: trang sau không bị lệch khi có phòng mới lên sóng,
+// và tốc độ không chậm dần khi lật sâu.
+func (q *Queries) ListLiveRooms(ctx context.Context, arg ListLiveRoomsParams) ([]ListLiveRoomsRow, error) {
+	rows, err := q.db.Query(ctx, listLiveRooms, arg.CursorStartedAt, arg.CursorID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiveRoomsRow
+	for rows.Next() {
+		var i ListLiveRoomsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Category,
+			&i.HostID,
+			&i.HostUsername,
+			&i.StartedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

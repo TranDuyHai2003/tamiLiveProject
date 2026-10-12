@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
@@ -52,11 +53,21 @@ func main() {
 		Tokens:   tokens,
 		User:     service.NewUserService(pool, tokens),
 		Gift:     service.NewGiftService(pool, cfg.GiftGemRatePercent),
-		Room:     service.NewRoomService(pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
+		Room:     service.NewRoomService(pool, cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
 		Chat:     service.NewChatService(pool, rdb),
 		MiniGame: service.NewMiniGameService(pool, cfg.MiniGameHMACSecret),
 		// Swagger UI tại /docs, tắt ở production
-		ServeAPIDocs: !cfg.IsProduction(),
+		ServeAPIDocs:       !cfg.IsProduction(),
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
+		Ready: func(ctx context.Context) error {
+			if err := pool.Ping(ctx); err != nil {
+				return fmt.Errorf("postgres: %w", err)
+			}
+			if err := rdb.Ping(ctx).Err(); err != nil {
+				return fmt.Errorf("redis: %w", err)
+			}
+			return nil
+		},
 	})
 
 	// 4. HTTP server

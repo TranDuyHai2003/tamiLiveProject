@@ -64,7 +64,7 @@ func TestErrorCodesAreDocumented(t *testing.T) {
 
 	codes := []string{
 		CodeMalformedRequest, CodeInvalidRequest, CodeAuthRequired, CodeTokenExpired, CodeTokenInvalid,
-		CodeUnauthorized, CodeInsufficient, CodeForbidden, CodeNotFound, CodeMethodNotAllowed, CodeConflict, CodeInternal,
+		CodeUnauthorized, CodeInsufficient, CodeForbidden, CodeNotFound, CodeMethodNotAllowed, CodeConflict, CodeInternal, CodeNotReady,
 	}
 	codes = append(codes, serviceCodes()...)
 	for _, c := range codes {

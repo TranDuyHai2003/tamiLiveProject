@@ -3,6 +3,19 @@ INSERT INTO rooms (host_id, title, description, category, status, livekit_room_n
 VALUES ($1, $2, $3, $4, 'LIVE', $5, NOW())
 RETURNING *;
 
+-- Phân trang bằng cursor (keyset): lấy các phòng "sau" phòng cuối của trang trước theo thứ tự
+-- (started_at, id) giảm dần. Không dùng OFFSET: trang sau không bị lệch khi có phòng mới lên sóng,
+-- và tốc độ không chậm dần khi lật sâu.
+-- name: ListLiveRooms :many
+SELECT r.id, r.title, r.category, r.host_id, u.username AS host_username, r.started_at
+FROM rooms r
+JOIN users u ON u.id = r.host_id
+WHERE r.status = 'LIVE'
+  AND (sqlc.narg(cursor_started_at)::timestamptz IS NULL
+       OR (r.started_at, r.id) < (sqlc.narg(cursor_started_at)::timestamptz, sqlc.narg(cursor_id)::uuid))
+ORDER BY r.started_at DESC, r.id DESC
+LIMIT sqlc.arg(row_limit);
+
 -- name: GetRoom :one
 SELECT * FROM rooms WHERE id = $1;
 

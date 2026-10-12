@@ -24,7 +24,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const testJWTSecret = "test-jwt-secret-0123456789abcdef0123"
+const (
+	testJWTSecret     = "test-jwt-secret-0123456789abcdef0123"
+	testLiveKitURL    = "ws://livekit.test"
+	testLiveKitSecret = "test-livekit-secret-0123456789abcdef"
+	testWebOrigin     = "http://localhost:3000"
+)
 
 func init() { gin.SetMode(gin.TestMode) }
 
@@ -72,8 +77,10 @@ func newAPITest(t *testing.T) *apiTest {
 			Tokens:   tokens,
 			User:     service.NewUserService(pool, tokens),
 			Gift:     service.NewGiftService(pool, 50),
-			Room:     service.NewRoomService(pool, "devkey", "test-livekit-secret-0123456789abcdef"),
+			Room:     service.NewRoomService(pool, testLiveKitURL, "devkey", testLiveKitSecret),
 			MiniGame: service.NewMiniGameService(pool, "test-minigame-secret"),
+
+			CORSAllowedOrigins: []string{testWebOrigin},
 		}),
 		routes: routes,
 	}

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"sync"
 
@@ -20,6 +21,10 @@ type Services struct {
 	MiniGame *service.MiniGameService
 	// ServeAPIDocs bật /docs (Swagger UI) và /openapi.yaml. Tắt ở production.
 	ServeAPIDocs bool
+	// CORSAllowedOrigins: origin của web app được gọi API từ trình duyệt.
+	CORSAllowedOrigins []string
+	// Ready kiểm tra kết nối tới các phụ thuộc (Postgres, Redis) cho /readyz.
+	Ready func(context.Context) error
 }
 
 var setupValidatorOnce sync.Once
@@ -32,9 +37,12 @@ func SetupRouter(s Services) *gin.Engine {
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
 	// Không ghi query string vào log vì WebSocket truyền access_token qua query
-	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipQueryString: true}), gin.CustomRecovery(recovery))
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipQueryString: true}), gin.CustomRecovery(recovery), CORS(s.CORSAllowedOrigins))
 	r.NoRoute(notFound)
 	r.NoMethod(methodNotAllowed)
+
+	r.GET("/healthz", healthz)
+	r.GET("/readyz", readyz(s.Ready))
 
 	if s.ServeAPIDocs {
 		r.GET("/openapi.yaml", func(c *gin.Context) { c.Data(http.StatusOK, "application/yaml", api.OpenAPISpec) })
@@ -53,6 +61,7 @@ func SetupRouter(s Services) *gin.Engine {
 	v1.POST("/auth/register", userHandler.Register)
 	v1.POST("/auth/login", userHandler.Login)
 	v1.POST("/games/results", gameHandler.SubmitResult) // xác thực bằng HMAC
+	v1.GET("/rooms", roomHandler.ListRooms)
 
 	// Cần đăng nhập
 	authed := v1.Group("", AuthMiddleware(s.Tokens))

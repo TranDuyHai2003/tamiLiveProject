@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,18 +19,20 @@ import (
 const liveKitTokenTTL = 6 * time.Hour
 
 type RoomService struct {
-	pool      *pgxpool.Pool
-	queries   *db.Queries
-	apiKey    string
-	apiSecret string
+	pool       *pgxpool.Pool
+	queries    *db.Queries
+	liveKitURL string // địa chỉ client kết nối LiveKit, trả kèm token khi vào phòng
+	apiKey     string
+	apiSecret  string
 }
 
-func NewRoomService(pool *pgxpool.Pool, apiKey, apiSecret string) *RoomService {
+func NewRoomService(pool *pgxpool.Pool, liveKitURL, apiKey, apiSecret string) *RoomService {
 	return &RoomService{
-		pool:      pool,
-		queries:   db.New(pool),
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
+		pool:       pool,
+		queries:    db.New(pool),
+		liveKitURL: liveKitURL,
+		apiKey:     apiKey,
+		apiSecret:  apiSecret,
 	}
 }
 
@@ -75,9 +79,87 @@ func (s *RoomService) GetRoom(ctx context.Context, roomID uuid.UUID) (db.Room, e
 	return room, nil
 }
 
+const (
+	defaultPageSize = 20
+	maxPageSize     = 100
+)
+
+// RoomSummary: một dòng trong danh sách phòng đang live.
+type RoomSummary struct {
+	ID           uuid.UUID `json:"id"`
+	Title        string    `json:"title"`
+	Category     *string   `json:"category"`
+	HostID       uuid.UUID `json:"host_id"`
+	HostUsername string    `json:"host_username"`
+	StartedAt    time.Time `json:"started_at"`
+}
+
+// ListLiveRooms trả một trang phòng đang LIVE (mới lên sóng trước) và cursor của trang sau
+// ("" nếu đã hết). Cursor là chuỗi mờ: client chỉ việc gửi lại, không tự phân tích.
+func (s *RoomService) ListLiveRooms(ctx context.Context, limit int, cursor string) ([]RoomSummary, string, error) {
+	if limit == 0 {
+		limit = defaultPageSize
+	}
+	if limit < 1 || limit > maxPageSize {
+		return nil, "", invalidField("limit", "range", fmt.Sprintf("limit must be in [1, %d]", maxPageSize))
+	}
+	params := db.ListLiveRoomsParams{RowLimit: int32(limit + 1)} // lấy dư 1 dòng để biết còn trang sau không
+	if cursor != "" {
+		startedAt, id, err := decodeRoomCursor(cursor)
+		if err != nil {
+			return nil, "", invalidField("cursor", "format", "invalid cursor")
+		}
+		params.CursorStartedAt, params.CursorID = &startedAt, &id
+	}
+
+	rows, err := s.queries.ListLiveRooms(ctx, params)
+	if err != nil {
+		return nil, "", fmt.Errorf("list live rooms: %w", err)
+	}
+
+	next := ""
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		next = encodeRoomCursor(*last.StartedAt, last.ID)
+	}
+	rooms := make([]RoomSummary, len(rows))
+	for i, r := range rows {
+		// Phòng LIVE luôn có started_at (CHECK check_room_started_at)
+		rooms[i] = RoomSummary{ID: r.ID, Title: r.Title, Category: r.Category, HostID: r.HostID, HostUsername: r.HostUsername, StartedAt: *r.StartedAt}
+	}
+	return rooms, next, nil
+}
+
+// Cursor = base64url("<started_at unix nano>:<room id>")
+func encodeRoomCursor(startedAt time.Time, id uuid.UUID) string {
+	return base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, "%d:%s", startedAt.UnixNano(), id))
+}
+
+func decodeRoomCursor(cursor string) (time.Time, uuid.UUID, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	nanos, idStr, ok := strings.Cut(string(raw), ":")
+	if !ok {
+		return time.Time{}, uuid.Nil, errors.New("malformed cursor")
+	}
+	n, err := strconv.ParseInt(nanos, 10, 64)
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	return time.Unix(0, n).UTC(), id, nil
+}
+
 type JoinRoomResult struct {
 	Room         db.Room           `json:"room"`
 	Role         db.RoomMemberRole `json:"role"`
+	LiveKitURL   string            `json:"livekit_url"`
 	LiveKitToken string            `json:"livekit_token"`
 }
 
@@ -125,7 +207,7 @@ func (s *RoomService) JoinRoom(ctx context.Context, roomID, userID uuid.UUID) (J
 		if err != nil {
 			return err
 		}
-		result = JoinRoomResult{Room: room, Role: member.Role, LiveKitToken: token}
+		result = JoinRoomResult{Room: room, Role: member.Role, LiveKitURL: s.liveKitURL, LiveKitToken: token}
 		return nil
 	})
 	if err != nil {

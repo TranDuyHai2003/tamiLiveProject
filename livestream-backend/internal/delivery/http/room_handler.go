@@ -38,6 +38,33 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": room})
 }
 
+type ListRoomsQuery struct {
+	// Hiện chỉ hỗ trợ LIVE; tham số có sẵn để sau này mở rộng mà không đổi hợp đồng.
+	Status string `form:"status" binding:"omitempty,oneof=LIVE"`
+	Limit  int    `form:"limit"`
+	Cursor string `form:"cursor"`
+}
+
+// ListRooms: GET /rooms. Public (xem danh sách không cần đăng nhập). Response phân trang:
+// {"data": [...], "next_cursor": "..." | null}.
+func (h *RoomHandler) ListRooms(c *gin.Context) {
+	var q ListRoomsQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	rooms, next, err := h.roomService.ListLiveRooms(c.Request.Context(), q.Limit, q.Cursor)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	var nextCursor *string
+	if next != "" {
+		nextCursor = &next
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rooms, "next_cursor": nextCursor})
+}
+
 func (h *RoomHandler) GetRoom(c *gin.Context) {
 	roomID, ok := pathUUID(c, "id")
 	if !ok {

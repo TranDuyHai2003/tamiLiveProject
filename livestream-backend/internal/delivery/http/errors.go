@@ -34,6 +34,7 @@ const (
 	CodeMethodNotAllowed = "METHOD_NOT_ALLOWED"
 	CodeConflict         = "CONFLICT"
 	CodeInternal         = "INTERNAL"
+	CodeNotReady         = "NOT_READY" // 503: /readyz, chưa kết nối được DB/Redis
 )
 
 type errorDetail struct {
@@ -104,19 +105,20 @@ func writeBindError(c *gin.Context, err error) {
 	abortWithError(c, http.StatusBadRequest, errorDetail{Code: CodeMalformedRequest, Message: "malformed request body"})
 }
 
-// useJSONFieldNames: lỗi validate báo tên trường theo JSON ("email") thay vì tên struct Go ("Email"),
-// để frontend map thẳng vào ô nhập.
+// useJSONFieldNames: lỗi validate báo tên trường theo tên client gửi lên ("email" trong JSON body,
+// "limit" trong query string) thay vì tên struct Go ("Email"), để frontend map thẳng vào ô nhập.
 func useJSONFieldNames() {
 	v, ok := binding.Validator.Engine().(*validator.Validate)
 	if !ok {
 		return
 	}
 	v.RegisterTagNameFunc(func(f reflect.StructField) string {
-		name := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
-		if name == "" || name == "-" {
-			return f.Name
+		for _, tag := range []string{"json", "form"} {
+			if name := strings.SplitN(f.Tag.Get(tag), ",", 2)[0]; name != "" && name != "-" {
+				return name
+			}
 		}
-		return name
+		return f.Name
 	})
 }
 

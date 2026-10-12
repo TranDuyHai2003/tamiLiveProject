@@ -48,7 +48,7 @@ func newFixture(t *testing.T) *fixture {
 		q:     db.New(pool),
 		users: NewUserService(pool, auth.NewTokenIssuer("test-jwt-secret-0123456789abcdef0123", time.Hour)),
 		gifts: NewGiftService(pool, testGemRatePercent),
-		rooms: NewRoomService(pool, "devkey", "test-livekit-secret-0123456789abcdef"),
+		rooms: NewRoomService(pool, "ws://livekit.test", "devkey", "test-livekit-secret-0123456789abcdef"),
 		pk:    NewPKService(pool),
 		games: NewMiniGameService(pool, testGameSecret),
 	}

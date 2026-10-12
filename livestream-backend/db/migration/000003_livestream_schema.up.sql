@@ -35,6 +35,8 @@ CREATE INDEX idx_rooms_category ON rooms(category);
 CREATE INDEX idx_rooms_created_at ON rooms(created_at);
 -- Mỗi host chỉ có tối đa 1 phòng đang LIVE
 CREATE UNIQUE INDEX idx_rooms_one_live_per_host ON rooms (host_id) WHERE status = 'LIVE';
+-- Trang chủ: danh sách phòng LIVE mới nhất trước, phân trang bằng cursor (started_at, id)
+CREATE INDEX idx_rooms_live_feed ON rooms (started_at DESC, id DESC) WHERE status = 'LIVE';
 
 CREATE TRIGGER trg_rooms_updated_at BEFORE UPDATE ON rooms
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

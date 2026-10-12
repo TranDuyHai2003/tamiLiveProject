@@ -4,21 +4,26 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
 	// development | staging | production. Production tắt /docs và bật Gin release mode.
-	AppEnv             string
-	HTTPAddr           string
-	DatabaseURL        string
-	RedisAddr          string
-	RedisPassword      string
-	JWTSecret          string
-	JWTTTL             time.Duration
+	AppEnv        string
+	HTTPAddr      string
+	DatabaseURL   string
+	RedisAddr     string
+	RedisPassword string
+	JWTSecret     string
+	JWTTTL        time.Duration
+	// Địa chỉ LiveKit mà CLIENT kết nối tới (VD ws://localhost:7980), trả về khi vào phòng
+	LiveKitURL         string
 	LiveKitAPIKey      string
 	LiveKitAPISecret   string
 	MiniGameHMACSecret string
+	// Origin được phép gọi API từ trình duyệt (CORS), VD http://localhost:3000
+	CORSAllowedOrigins []string
 	// Tỷ lệ % giá trị COIN của quà được quy đổi thành GEM cho người nhận (0-100)
 	GiftGemRatePercent int64
 }
@@ -32,6 +37,7 @@ func Load() (Config, error) {
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
+		LiveKitURL:         os.Getenv("LIVEKIT_URL"),
 		LiveKitAPIKey:      os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:   os.Getenv("LIVEKIT_API_SECRET"),
 		MiniGameHMACSecret: os.Getenv("MINIGAME_HMAC_SECRET"),
@@ -40,6 +46,7 @@ func Load() (Config, error) {
 	required := map[string]string{
 		"DATABASE_URL":         cfg.DatabaseURL,
 		"JWT_SECRET":           cfg.JWTSecret,
+		"LIVEKIT_URL":          cfg.LiveKitURL,
 		"LIVEKIT_API_KEY":      cfg.LiveKitAPIKey,
 		"LIVEKIT_API_SECRET":   cfg.LiveKitAPISecret,
 		"MINIGAME_HMAC_SECRET": cfg.MiniGameHMACSecret,
@@ -56,6 +63,12 @@ func Load() (Config, error) {
 	}
 	if len(cfg.JWTSecret) < 32 {
 		return Config{}, fmt.Errorf("JWT_SECRET must be at least 32 bytes")
+	}
+
+	for _, origin := range strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"), ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			cfg.CORSAllowedOrigins = append(cfg.CORSAllowedOrigins, origin)
+		}
 	}
 
 	ttl, err := time.ParseDuration(getEnv("JWT_TTL", "24h"))

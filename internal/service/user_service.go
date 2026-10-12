@@ -41,11 +41,11 @@ func (s *UserService) Register(ctx context.Context, username, email, password st
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	if !usernamePattern.MatchString(username) {
-		return db.CreateUserRow{}, fmt.Errorf("%w: username must be 3-50 chars of letters, digits, '_' or '.'", ErrInvalidInput)
+		return db.CreateUserRow{}, invalidField("username", "format", "username must be 3-50 chars of letters, digits, '_' or '.'")
 	}
 	// bcrypt chỉ dùng 72 byte đầu tiên
 	if len(password) < 8 || len(password) > 72 {
-		return db.CreateUserRow{}, fmt.Errorf("%w: password must be 8-72 bytes", ErrInvalidInput)
+		return db.CreateUserRow{}, invalidField("password", "length", "password must be 8-72 bytes")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -68,10 +68,10 @@ func (s *UserService) Register(ctx context.Context, username, email, password st
 		return err
 	})
 	if isUniqueViolation(err, "users_username_key") || isUniqueViolation(err, "idx_users_username_lower") {
-		return db.CreateUserRow{}, fmt.Errorf("%w: username already exists", ErrConflict)
+		return db.CreateUserRow{}, &Error{Kind: ErrConflict, Code: CodeUsernameTaken, Message: "username already exists", Fields: []FieldError{{Field: "username", Rule: "unique"}}}
 	}
 	if isUniqueViolation(err, "users_email_key") || isUniqueViolation(err, "idx_users_email_lower") {
-		return db.CreateUserRow{}, fmt.Errorf("%w: email already exists", ErrConflict)
+		return db.CreateUserRow{}, &Error{Kind: ErrConflict, Code: CodeEmailTaken, Message: "email already exists", Fields: []FieldError{{Field: "email", Rule: "unique"}}}
 	}
 	if err != nil {
 		return db.CreateUserRow{}, fmt.Errorf("register user: %w", err)
@@ -89,7 +89,7 @@ func (s *UserService) Login(ctx context.Context, email, password string) (LoginR
 	cred, err := s.queries.GetUserCredentialsByEmail(ctx, strings.TrimSpace(email))
 	if isNoRows(err) {
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
-		return LoginResult{}, fmt.Errorf("%w: invalid email or password", ErrUnauthorized)
+		return LoginResult{}, newError(ErrUnauthorized, CodeInvalidCredentials, "invalid email or password")
 	}
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("get credentials: %w", err)
@@ -97,12 +97,12 @@ func (s *UserService) Login(ctx context.Context, email, password string) (LoginR
 
 	if err := bcrypt.CompareHashAndPassword([]byte(cred.PasswordHash), []byte(password)); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return LoginResult{}, fmt.Errorf("%w: invalid email or password", ErrUnauthorized)
+			return LoginResult{}, newError(ErrUnauthorized, CodeInvalidCredentials, "invalid email or password")
 		}
 		return LoginResult{}, fmt.Errorf("compare password: %w", err)
 	}
 	if cred.Status != db.UserStatusACTIVE {
-		return LoginResult{}, fmt.Errorf("%w: account is %s", ErrForbidden, strings.ToLower(string(cred.Status)))
+		return LoginResult{}, newError(ErrForbidden, CodeAccountDisabled, "account is "+strings.ToLower(string(cred.Status)))
 	}
 
 	token, expiresAt, err := s.tokens.Issue(cred.ID)

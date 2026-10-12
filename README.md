@@ -24,6 +24,13 @@ make run                        # API ở http://localhost:8080
 
 `make help` liệt kê mọi lệnh.
 
+## Hợp đồng API
+
+`api/openapi.yaml` là nguồn sự thật của API. Khi server chạy ở dev, xem và thử API tại **http://localhost:8080/docs** (Swagger UI).
+
+- Thành công: `{"data": ...}`. Lỗi: `{"error": {"code", "message", "fields"?}}`; client xử lý theo `code`.
+- Thêm hoặc sửa endpoint thì sửa `openapi.yaml` cùng lúc: test sẽ đỏ nếu route và hợp đồng lệch nhau, hoặc response không khớp schema.
+
 ## Test
 
 ```bash

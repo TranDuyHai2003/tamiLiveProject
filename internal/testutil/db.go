@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 
+	"livestream-backend/internal/db"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,7 +48,8 @@ func Pool(t testing.TB) *pgxpool.Pool {
 			poolErr = fmt.Errorf("refusing to run tests against database %q: name must end with _test", name)
 			return
 		}
-		cfg.MaxConns = 30 // đủ cho test đồng thời
+		db.ConfigurePool(cfg) // cùng thiết lập với server (VD thời gian UTC)
+		cfg.MaxConns = 30     // đủ cho test đồng thời
 		pool, poolErr = pgxpool.NewWithConfig(context.Background(), cfg)
 		if poolErr == nil {
 			poolErr = pool.Ping(context.Background())

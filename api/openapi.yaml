@@ -1,0 +1,709 @@
+openapi: 3.0.3
+info:
+  title: TamiLive API
+  version: 0.2.0
+  description: |
+    Hợp đồng API giữa backend và client. **File này là nguồn sự thật**: thêm/sửa endpoint
+    thì sửa file này cùng lúc (CI kiểm tra mọi route đều có ở đây và mọi response khớp schema).
+
+    ## Quy ước chung
+
+    - **Thành công:** body luôn có dạng `{"data": ...}`. Thao tác không có dữ liệu trả về dùng `204 No Content`.
+    - **Lỗi:** body luôn có dạng `{"error": {"code", "message", "fields"?}}` (xem schema `Error`).
+      Client xử lý theo `code` (ổn định), không theo `message` (có thể đổi câu chữ).
+    - **Mã HTTP:** `400` request hỏng (JSON sai, ID sai định dạng) · `401` chưa xác thực ·
+      `402` không đủ số dư · `403` không có quyền · `404` không tồn tại · `409` xung đột trạng thái ·
+      `422` dữ liệu đúng định dạng nhưng vi phạm luật (validate) · `500` lỗi hệ thống.
+    - **Thời gian:** chuỗi RFC 3339, luôn ở **UTC** (`2026-10-12T03:04:05Z`). Client tự đổi sang giờ địa phương.
+    - **Tiền:** số nguyên (đơn vị nhỏ nhất của COIN/GEM), không bao giờ là số thực.
+    - **ID:** UUID dạng chuỗi.
+    - **Tên trường:** `snake_case`.
+    - **Phân trang** (áp dụng cho mọi endpoint danh sách, từ bước 3): `?limit=` (mặc định 20, tối đa 100)
+      và `?cursor=` (chuỗi mờ, lấy từ `next_cursor` của trang trước). Response:
+      `{"data": [...], "next_cursor": "..." | null}`.
+    - **Idempotency:** endpoint ghi tiền nhận header `Idempotency-Key` (client sinh UUID cho MỖI lần bấm,
+      gửi lại y nguyên khi retry). Cùng key + cùng nội dung → trả lại kết quả cũ, không trừ tiền lần hai.
+    - **Xác thực:** header `Authorization: Bearer <access_token>` lấy từ `/auth/login`.
+servers:
+  - url: /api/v1
+
+tags:
+  - name: auth
+  - name: rooms
+  - name: gifts
+  - name: games
+  - name: chat
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Đăng ký tài khoản (tạo luôn ví)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Đã tạo tài khoản
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '409':
+          description: '`USERNAME_TAKEN` hoặc `EMAIL_TAKEN` (kèm `fields` chỉ ô bị trùng)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Đăng nhập, nhận access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Đăng nhập thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LoginResult' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401':
+          description: '`INVALID_CREDENTIALS`: sai email hoặc mật khẩu'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: '`ACCOUNT_DISABLED`: tài khoản bị khóa hoặc đã xóa'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /me:
+    get:
+      tags: [auth]
+      summary: Hồ sơ và số dư của user đang đăng nhập
+      responses:
+        '200':
+          description: Hồ sơ
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Profile' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /rooms:
+    post:
+      tags: [rooms]
+      summary: Mở phòng live (user đang đăng nhập là host)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoomRequest' }
+      responses:
+        '201':
+          description: Phòng đã LIVE
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Room' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409':
+          description: '`ALREADY_LIVE`: host đang có phòng live khác'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /rooms/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    get:
+      tags: [rooms]
+      summary: Xem thông tin phòng
+      responses:
+        '200':
+          description: Phòng
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Room' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rooms/{id}/join:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [rooms]
+      summary: Vào phòng, nhận LiveKit token
+      description: Quyền phát hình do server tính theo vai trò trong phòng, client không tự khai.
+      responses:
+        '200':
+          description: Đã vào phòng
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/JoinRoomResult' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: '`BANNED_FROM_ROOM`: đã bị kick/ban khỏi phòng'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RoomNotLive' }
+
+  /rooms/{id}/leave:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [rooms]
+      summary: Rời phòng
+      responses:
+        '204': { description: Đã rời phòng }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /rooms/{id}/end:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [rooms]
+      summary: Kết thúc phòng (chỉ host)
+      description: Đồng thời cho mọi thành viên rời phòng, hủy game đang mở, chốt trận PK đang diễn ra.
+      responses:
+        '200':
+          description: Phòng đã ENDED
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Room' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RoomNotLive' }
+
+  /rooms/{id}/gifts:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [gifts]
+      summary: Tặng quà trong phòng
+      description: |
+        Người gửi là user đang đăng nhập. Mặc định quà tặng cho host; `receiver_id` chỉ dùng cho co-host.
+        Trừ COIN người gửi, cộng GEM cho người nhận, cộng điểm PK nếu phòng đang đấu, trong một transaction.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendGiftRequest' }
+      responses:
+        '200':
+          description: Đã tặng (hoặc `replayed = true` nếu là request lặp lại cùng key)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/SendGiftResult' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '402':
+          description: '`INSUFFICIENT_BALANCE`: không đủ COIN → gợi ý nạp tiền'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`ROOM_NOT_LIVE` hoặc `IDEMPOTENCY_KEY_REUSED` (cùng key nhưng nội dung khác)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /rooms/{id}/games:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [games]
+      summary: Host mở một phiên mini game trong phòng
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGameSessionRequest' }
+      responses:
+        '201':
+          description: Phiên đang chờ người chơi (WAITING)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/GameSession' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /games/sessions/{id}/join:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [games]
+      summary: Xin vào ghế (server tự xếp ghế trống)
+      responses:
+        '201':
+          description: Đã có ghế
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/GamePlayer' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /games/sessions/{id}/start:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [games]
+      summary: Host bắt đầu phiên (WAITING → RUNNING)
+      responses:
+        '204': { description: Đã bắt đầu }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /games/sessions/{id}/end:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    post:
+      tags: [games]
+      summary: Host kết thúc phiên (WAITING → CANCELLED, RUNNING → FINISHED)
+      responses:
+        '204': { description: Đã kết thúc }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /games/results:
+    post:
+      tags: [games]
+      summary: Game provider gửi kết quả (server-to-server)
+      description: |
+        Không dùng JWT. Xác thực bằng `signature` = hex(HMAC-SHA256(secret, "session_id|user_id|score|reward_coin")).
+        Chữ ký chỉ chứng minh "tin đến từ provider", không chứng minh số thưởng hợp lý (xem BUSINESS.md §7).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitGameResultRequest' }
+      responses:
+        '200':
+          description: Đã ghi nhận và trả thưởng
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/GameResultOutput' }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401':
+          description: '`UNAUTHORIZED`: chữ ký sai'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '402':
+          description: '`REWARD_BUDGET_EXHAUSTED`: hết quỹ thưởng, kết quả chưa được ghi, gửi lại sau'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /ws/chat/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    get:
+      tags: [chat]
+      summary: WebSocket chat của phòng
+      description: |
+        Trình duyệt không gửi được header khi mở WebSocket, nên token đi qua `?access_token=`
+        (sẽ thay bằng vé dùng một lần ở bước 8). Phải đang JOINED trong phòng.
+
+        - Client gửi: `{"content": "..."}` (1–500 ký tự)
+        - Server gửi: schema `ChatMessage`
+        - Bị kick/ban hoặc phòng kết thúc: server đóng kết nối.
+      parameters:
+        - name: access_token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '101': { description: Đã nâng cấp lên WebSocket }
+        '400': { $ref: '#/components/responses/MalformedRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/RoomNotLive' }
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID do client sinh cho mỗi lần bấm; gửi lại y nguyên khi retry.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+
+  responses:
+    MalformedRequest:
+      description: '`MALFORMED_REQUEST`: JSON hỏng, sai kiểu dữ liệu, hoặc ID không phải UUID'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: '`VALIDATION_ERROR` (kèm `fields`) hoặc `INVALID_REQUEST` (vi phạm luật nghiệp vụ)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: '`AUTH_REQUIRED` (không gửi token), `TOKEN_EXPIRED` (làm mới token) hoặc `TOKEN_INVALID` (đăng nhập lại)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: '`FORBIDDEN`: không có quyền với tài nguyên này'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: '`NOT_FOUND`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: '`CONFLICT`: trạng thái hiện tại không cho phép thao tác này'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RoomNotLive:
+      description: '`ROOM_NOT_LIVE`: phòng đã kết thúc'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              description: Mã ổn định, client xử lý theo mã này.
+              enum:
+                - MALFORMED_REQUEST
+                - VALIDATION_ERROR
+                - INVALID_REQUEST
+                - AUTH_REQUIRED
+                - TOKEN_EXPIRED
+                - TOKEN_INVALID
+                - UNAUTHORIZED
+                - INVALID_CREDENTIALS
+                - ACCOUNT_DISABLED
+                - INSUFFICIENT_BALANCE
+                - REWARD_BUDGET_EXHAUSTED
+                - FORBIDDEN
+                - BANNED_FROM_ROOM
+                - NOT_FOUND
+                - METHOD_NOT_ALLOWED
+                - CONFLICT
+                - ROOM_NOT_LIVE
+                - ALREADY_LIVE
+                - IDEMPOTENCY_KEY_REUSED
+                - USERNAME_TAKEN
+                - EMAIL_TAKEN
+                - INTERNAL
+            message:
+              type: string
+              description: Mô tả cho người đọc log. Không dùng để rẽ nhánh logic.
+            fields:
+              type: array
+              description: Các ô nhập sai (với VALIDATION_ERROR, USERNAME_TAKEN, EMAIL_TAKEN).
+              items:
+                type: object
+                required: [field, rule]
+                additionalProperties: false
+                properties:
+                  field: { type: string, example: email }
+                  rule: { type: string, example: email }
+
+    RegisterRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username: { type: string, pattern: '^[a-zA-Z0-9_.]{3,50}$' }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 72 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    LoginResult:
+      type: object
+      required: [access_token, expires_at, user_id]
+      additionalProperties: false
+      properties:
+        access_token: { type: string }
+        expires_at: { type: string, format: date-time }
+        user_id: { type: string, format: uuid }
+
+    User:
+      type: object
+      required: [id, username, email, role, status, level, avatar_url, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [VIEWER, HOST, AGENCY, ADMIN] }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, BANNED, DELETED] }
+        level: { type: integer, minimum: 1 }
+        avatar_url: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Profile:
+      description: User kèm số dư ví.
+      type: object
+      required: [id, username, email, role, status, level, avatar_url, created_at, coin, gem]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [VIEWER, HOST, AGENCY, ADMIN] }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, BANNED, DELETED] }
+        level: { type: integer, minimum: 1 }
+        avatar_url: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        coin: { type: integer, format: int64, minimum: 0 }
+        gem: { type: integer, format: int64, minimum: 0 }
+
+    CreateRoomRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 255 }
+        description: { type: string }
+        category: { type: string }
+
+    Room:
+      type: object
+      required: [id, host_id, title, description, category, status, livekit_room_name, started_at, ended_at, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        host_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        status: { type: string, enum: [SCHEDULED, LIVE, ENDED, CANCELLED] }
+        livekit_room_name: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    JoinRoomResult:
+      type: object
+      required: [room, role, livekit_token]
+      additionalProperties: false
+      properties:
+        room: { $ref: '#/components/schemas/Room' }
+        role: { type: string, enum: [VIEWER, HOST, CO_HOST, MODERATOR] }
+        livekit_token:
+          type: string
+          description: JWT để kết nối LiveKit. HOST/CO_HOST được phát hình; VIEWER chỉ xem.
+
+    SendGiftRequest:
+      type: object
+      required: [gift_id, quantity]
+      properties:
+        gift_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 9999 }
+        receiver_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Bỏ trống = tặng host. Chỉ chấp nhận co-host đang trong phòng.
+
+    SendGiftResult:
+      type: object
+      required: [gift_log_id, transaction_id, receiver_id, total_coin, total_gem, sender_coin_balance, replayed]
+      additionalProperties: false
+      properties:
+        gift_log_id: { type: string, format: uuid }
+        transaction_id: { type: string, format: uuid }
+        receiver_id: { type: string, format: uuid }
+        total_coin: { type: integer, format: int64 }
+        total_gem: { type: integer, format: int64 }
+        sender_coin_balance: { type: integer, format: int64, minimum: 0 }
+        pk_battle_id:
+          type: string
+          format: uuid
+          description: Có mặt nếu quà được cộng điểm cho một trận PK.
+        replayed:
+          type: boolean
+          description: true nếu đây là kết quả của request trước đó có cùng Idempotency-Key.
+
+    CreateGameSessionRequest:
+      type: object
+      required: [game_id]
+      properties:
+        game_id: { type: string, format: uuid }
+        max_players: { type: integer, minimum: 0, maximum: 16, description: '0 hoặc bỏ trống = 4' }
+
+    GameSession:
+      type: object
+      required: [id, room_id, game_id, host_id, status, max_players, started_at, ended_at, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        room_id: { type: string, format: uuid }
+        game_id: { type: string, format: uuid }
+        host_id: { type: string, format: uuid }
+        status: { type: string, enum: [WAITING, RUNNING, FINISHED, CANCELLED] }
+        max_players: { type: integer }
+        started_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    GamePlayer:
+      type: object
+      required: [id, session_id, user_id, status, seat_number, joined_at, left_at, created_at, updated_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, APPROVED, PLAYING, LEFT, KICKED, FINISHED] }
+        seat_number: { type: integer, nullable: true }
+        joined_at: { type: string, format: date-time, nullable: true }
+        left_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SubmitGameResultRequest:
+      type: object
+      required: [session_id, user_id, signature]
+      properties:
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        score: { type: integer, format: int64, minimum: 0 }
+        reward_coin: { type: integer, format: int64, minimum: 0 }
+        payload: { description: 'Dữ liệu tham khảo của provider, không nằm trong chữ ký.' }
+        signature: { type: string }
+
+    GameResultOutput:
+      type: object
+      required: [result_id, reward_coin]
+      additionalProperties: false
+      properties:
+        result_id: { type: string, format: uuid }
+        reward_coin: { type: integer, format: int64 }
+        transaction_id: { type: string, format: uuid }
+
+    ChatMessage:
+      description: Tin nhắn server đẩy qua WebSocket `/ws/chat/{id}`.
+      type: object
+      required: [id, room_id, user_id, username, content, sent_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        room_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        content: { type: string }
+        sent_at: { type: string, format: date-time }

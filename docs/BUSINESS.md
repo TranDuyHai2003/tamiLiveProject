@@ -157,7 +157,7 @@ Bảng giá lưu trong `coin_packages`, mỗi gói gắn với một kênh (`WEB
 6. Đối soát: Google Play báo hoàn tiền qua RTDN, Apple qua App Store Server Notifications. Có thêm **job hằng ngày** gọi API Voided Purchases (Google) để bắt các lần hoàn tiền bị lỡ webhook.
 
 ### 5.2 Tặng quà (GIFT)
-`POST /api/rooms/:id/gifts` với header `Idempotency-Key`.
+`POST /api/v1/rooms/{id}/gifts` với header `Idempotency-Key` (hợp đồng chi tiết: `api/openapi.yaml`).
 
 Trong **một DB transaction** (`GiftService.SendGift`):
 1. Ghi idempotency key; nếu trùng key → trả lại kết quả cũ (hoặc lỗi nếu body khác).

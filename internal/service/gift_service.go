@@ -64,10 +64,10 @@ type SendGiftResult struct {
 //  4. Ghi gift_logs, và cộng điểm PK nếu phòng đang trong trận PK ACTIVE.
 func (s *GiftService) SendGift(ctx context.Context, in SendGiftInput) (SendGiftResult, error) {
 	if in.Quantity < 1 || in.Quantity > maxGiftQuantity {
-		return SendGiftResult{}, fmt.Errorf("%w: quantity must be in [1, %d]", ErrInvalidInput, maxGiftQuantity)
+		return SendGiftResult{}, invalidField("quantity", "range", fmt.Sprintf("quantity must be in [1, %d]", maxGiftQuantity))
 	}
 	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxIdempotencyKey {
-		return SendGiftResult{}, fmt.Errorf("%w: idempotency_key must be 1-%d chars", ErrInvalidInput, maxIdempotencyKey)
+		return SendGiftResult{}, invalidField("Idempotency-Key", "required", fmt.Sprintf("Idempotency-Key header must be 1-%d chars", maxIdempotencyKey))
 	}
 	requestHash := hashGiftRequest(in)
 
@@ -97,7 +97,7 @@ func (s *GiftService) SendGift(ctx context.Context, in SendGiftInput) (SendGiftR
 			return fmt.Errorf("get room: %w", err)
 		}
 		if room.Status != db.RoomStatusLIVE {
-			return fmt.Errorf("%w: room is not live", ErrConflict)
+			return errRoomNotLive()
 		}
 
 		receiverID := room.HostID
@@ -233,7 +233,7 @@ func replayGift(ctx context.Context, q *db.Queries, userID uuid.UUID, key, reque
 		return SendGiftResult{}, fmt.Errorf("get idempotency key: %w", err)
 	}
 	if existing.RequestHash != requestHash {
-		return SendGiftResult{}, fmt.Errorf("%w: idempotency_key was already used for a different request", ErrConflict)
+		return SendGiftResult{}, newError(ErrConflict, CodeIdempotencyKeyReused, "Idempotency-Key was already used for a different request")
 	}
 	if existing.Status != db.IdempotencyStatusCOMPLETED {
 		return SendGiftResult{}, fmt.Errorf("%w: request with this idempotency_key is still processing", ErrConflict)

@@ -30,7 +30,7 @@ func (h *MiniGameHandler) CreateSession(c *gin.Context) {
 	}
 	var req CreateGameSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBindError(c, err)
 		return
 	}
 	session, err := h.miniGameService.CreateSession(c.Request.Context(), currentUserID(c), roomID, req.GameID, req.MaxPlayers)
@@ -91,7 +91,7 @@ type SubmitGameResultRequest struct {
 func (h *MiniGameHandler) SubmitResult(c *gin.Context) {
 	var req SubmitGameResultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeBindError(c, err)
 		return
 	}
 	out, err := h.miniGameService.SubmitResult(c.Request.Context(), service.GameResultInput{

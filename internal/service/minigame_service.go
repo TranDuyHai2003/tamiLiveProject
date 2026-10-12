@@ -35,7 +35,7 @@ func (s *MiniGameService) CreateSession(ctx context.Context, hostID, roomID, gam
 		maxPlayers = defaultMaxPlayers
 	}
 	if maxPlayers < 1 || maxPlayers > maxMaxPlayers {
-		return db.GameSession{}, fmt.Errorf("%w: max_players must be in [1, %d]", ErrInvalidInput, maxMaxPlayers)
+		return db.GameSession{}, invalidField("max_players", "range", fmt.Sprintf("max_players must be in [1, %d]", maxMaxPlayers))
 	}
 
 	var session db.GameSession
@@ -51,7 +51,7 @@ func (s *MiniGameService) CreateSession(ctx context.Context, hostID, roomID, gam
 			return fmt.Errorf("%w: only the host can start a game", ErrForbidden)
 		}
 		if room.Status != db.RoomStatusLIVE {
-			return fmt.Errorf("%w: room is not live", ErrConflict)
+			return errRoomNotLive()
 		}
 		if _, err := q.GetActiveGame(ctx, gameID); isNoRows(err) {
 			return fmt.Errorf("%w: game not found or inactive", ErrNotFound)
@@ -267,7 +267,7 @@ func (s *MiniGameService) SubmitResult(ctx context.Context, in GameResultInput) 
 		if errors.Is(err, ErrInsufficientBalance) {
 			// Ví bị trừ duy nhất là SYSTEM_REWARD (không được âm): hết ngân sách thưởng.
 			// Rollback cả kết quả, nên provider gửi lại được sau khi admin nạp thêm ngân sách.
-			return fmt.Errorf("%w: game reward budget exhausted", ErrInsufficientBalance)
+			return newError(ErrInsufficientBalance, CodeRewardBudgetExhausted, "game reward budget exhausted")
 		}
 		if err != nil {
 			return err

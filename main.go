@@ -15,6 +15,8 @@ import (
 	httpdelivery "livestream-backend/internal/delivery/http"
 	"livestream-backend/internal/pkg"
 	"livestream-backend/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -42,6 +44,9 @@ func main() {
 	defer rdb.Close()
 
 	// 3. Services
+	if cfg.IsProduction() {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTTTL)
 	router := httpdelivery.SetupRouter(httpdelivery.Services{
 		Tokens:   tokens,
@@ -50,6 +55,8 @@ func main() {
 		Room:     service.NewRoomService(pool, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
 		Chat:     service.NewChatService(pool, rdb),
 		MiniGame: service.NewMiniGameService(pool, cfg.MiniGameHMACSecret),
+		// Swagger UI tại /docs, tắt ở production
+		ServeAPIDocs: !cfg.IsProduction(),
 	})
 
 	// 4. HTTP server

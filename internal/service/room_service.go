@@ -36,7 +36,7 @@ func NewRoomService(pool *pgxpool.Pool, apiKey, apiSecret string) *RoomService {
 func (s *RoomService) CreateRoom(ctx context.Context, hostID uuid.UUID, title, description, category string) (db.Room, error) {
 	title = strings.TrimSpace(title)
 	if title == "" || len(title) > 255 {
-		return db.Room{}, fmt.Errorf("%w: title must be 1-255 chars", ErrInvalidInput)
+		return db.Room{}, invalidField("title", "length", "title must be 1-255 chars")
 	}
 
 	var room db.Room
@@ -56,7 +56,7 @@ func (s *RoomService) CreateRoom(ctx context.Context, hostID uuid.UUID, title, d
 		return err
 	})
 	if isUniqueViolation(err, "idx_rooms_one_live_per_host") {
-		return db.Room{}, fmt.Errorf("%w: you already have a live room", ErrConflict)
+		return db.Room{}, newError(ErrConflict, CodeAlreadyLive, "you already have a live room")
 	}
 	if err != nil {
 		return db.Room{}, fmt.Errorf("create room: %w", err)
@@ -105,7 +105,7 @@ func (s *RoomService) JoinRoom(ctx context.Context, roomID, userID uuid.UUID) (J
 			return fmt.Errorf("get room: %w", err)
 		}
 		if room.Status != db.RoomStatusLIVE || room.LivekitRoomName == nil {
-			return fmt.Errorf("%w: room is not live", ErrConflict)
+			return errRoomNotLive()
 		}
 
 		role := db.RoomMemberRoleVIEWER
@@ -114,7 +114,7 @@ func (s *RoomService) JoinRoom(ctx context.Context, roomID, userID uuid.UUID) (J
 		}
 		member, err := q.JoinRoomMember(ctx, db.JoinRoomMemberParams{RoomID: roomID, UserID: userID, Role: role})
 		if isNoRows(err) {
-			return fmt.Errorf("%w: you were kicked or banned from this room", ErrForbidden)
+			return newError(ErrForbidden, CodeBannedFromRoom, "you were kicked or banned from this room")
 		}
 		if err != nil {
 			return fmt.Errorf("join room: %w", err)
@@ -190,7 +190,7 @@ func (s *RoomService) EnsureCanChat(ctx context.Context, roomID, userID uuid.UUI
 		return "", err
 	}
 	if room.Status != db.RoomStatusLIVE {
-		return "", fmt.Errorf("%w: room is not live", ErrConflict)
+		return "", errRoomNotLive()
 	}
 	member, err := s.queries.GetRoomMember(ctx, db.GetRoomMemberParams{RoomID: roomID, UserID: userID})
 	if isNoRows(err) || (err == nil && member.Status != db.RoomMemberStatusJOINED) {
@@ -237,7 +237,7 @@ func explainEndRoomFailure(ctx context.Context, q *db.Queries, roomID, hostID uu
 	if room.HostID != hostID {
 		return fmt.Errorf("%w: only the host can end the room", ErrForbidden)
 	}
-	return fmt.Errorf("%w: room is not live", ErrConflict)
+	return errRoomNotLive()
 }
 
 func optionalString(s string) *string {

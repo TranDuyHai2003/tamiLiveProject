@@ -9,7 +9,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrInvalidToken = errors.New("invalid or expired token")
+var (
+	// ErrTokenExpired: token đúng chữ ký nhưng đã hết hạn → client nên làm mới token.
+	ErrTokenExpired = errors.New("token expired")
+	// ErrInvalidToken: token sai, bị sửa, hoặc ký bằng thuật toán khác → client về màn đăng nhập.
+	ErrInvalidToken = errors.New("invalid token")
+)
 
 // TokenIssuer ký và xác thực access token (JWT HS256).
 type TokenIssuer struct {
@@ -22,7 +27,7 @@ func NewTokenIssuer(secret string, ttl time.Duration) *TokenIssuer {
 }
 
 func (t *TokenIssuer) Issue(userID uuid.UUID) (string, time.Time, error) {
-	now := time.Now()
+	now := time.Now().UTC()
 	expiresAt := now.Add(t.ttl)
 	claims := jwt.RegisteredClaims{
 		Subject:   userID.String(),
@@ -43,6 +48,9 @@ func (t *TokenIssuer) Parse(tokenString string) (uuid.UUID, error) {
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithExpirationRequired(),
 	)
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		return uuid.Nil, ErrTokenExpired
+	}
 	if err != nil {
 		return uuid.Nil, ErrInvalidToken
 	}

@@ -40,7 +40,7 @@ func NewChatService(pool *pgxpool.Pool, rdb *redis.Client) *ChatService {
 func (s *ChatService) SendMessage(ctx context.Context, roomID, userID uuid.UUID, username, content string) (ChatMessage, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || utf8.RuneCountInString(content) > maxChatMessageRunes {
-		return ChatMessage{}, fmt.Errorf("%w: message must be 1-%d characters", ErrInvalidInput, maxChatMessageRunes)
+		return ChatMessage{}, invalidField("content", "length", fmt.Sprintf("message must be 1-%d characters", maxChatMessageRunes))
 	}
 
 	row, err := s.queries.CreateChatMessage(ctx, db.CreateChatMessageParams{RoomID: roomID, UserID: userID, Message: content})

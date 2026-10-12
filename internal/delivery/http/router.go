@@ -1,6 +1,10 @@
 package http
 
 import (
+	"net/http"
+	"sync"
+
+	"livestream-backend/api"
 	"livestream-backend/internal/auth"
 	"livestream-backend/internal/service"
 
@@ -14,12 +18,28 @@ type Services struct {
 	Room     *service.RoomService
 	Chat     *service.ChatService
 	MiniGame *service.MiniGameService
+	// ServeAPIDocs bật /docs (Swagger UI) và /openapi.yaml. Tắt ở production.
+	ServeAPIDocs bool
 }
 
+var setupValidatorOnce sync.Once
+
+// SetupRouter khai báo mọi route. Mỗi route ở đây PHẢI có trong api/openapi.yaml
+// (test TestRoutesMatchOpenAPISpec chặn việc quên cập nhật hợp đồng).
 func SetupRouter(s Services) *gin.Engine {
+	setupValidatorOnce.Do(useJSONFieldNames)
+
 	r := gin.New()
+	r.HandleMethodNotAllowed = true
 	// Không ghi query string vào log vì WebSocket truyền access_token qua query
-	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipQueryString: true}), gin.Recovery())
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipQueryString: true}), gin.CustomRecovery(recovery))
+	r.NoRoute(notFound)
+	r.NoMethod(methodNotAllowed)
+
+	if s.ServeAPIDocs {
+		r.GET("/openapi.yaml", func(c *gin.Context) { c.Data(http.StatusOK, "application/yaml", api.OpenAPISpec) })
+		r.GET("/docs", func(c *gin.Context) { c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(api.DocsHTML)) })
+	}
 
 	userHandler := NewUserHandler(s.User)
 	giftHandler := NewGiftHandler(s.Gift)
@@ -38,13 +58,12 @@ func SetupRouter(s Services) *gin.Engine {
 	authed := v1.Group("", AuthMiddleware(s.Tokens))
 	authed.GET("/me", userHandler.Me)
 
-	authed.POST("/gifts/send", giftHandler.SendGift)
-
 	authed.POST("/rooms", roomHandler.CreateRoom)
 	authed.GET("/rooms/:id", roomHandler.GetRoom)
 	authed.POST("/rooms/:id/join", roomHandler.JoinRoom)
 	authed.POST("/rooms/:id/leave", roomHandler.LeaveRoom)
 	authed.POST("/rooms/:id/end", roomHandler.EndRoom)
+	authed.POST("/rooms/:id/gifts", giftHandler.SendGift)
 	authed.POST("/rooms/:id/games", gameHandler.CreateSession)
 
 	authed.POST("/games/sessions/:id/join", gameHandler.JoinSession)

@@ -35,9 +35,9 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 | Bước | Tên | Sau bước này, người dùng / đội làm được gì | Trạng thái |
 |---|---|---|---|
 | 0 | Nền móng backend + luật dữ liệu tiền | (Chỉ backend) Đăng ký, phòng, chat, tặng quà; DB chặn mọi dữ liệu tiền sai | ✅ Xong |
-| 1 | Môi trường dev và lưới an toàn | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | ✅ Xong (chờ CI chạy lần đầu trên GitHub) |
-| **2** | **Hợp đồng API** | Frontend biết chính xác API trả gì, lỗi trông thế nào | 🔜 **Tiếp theo** |
-| 3 | Bộ khung chạy thật (MVP-1) | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | Chờ |
+| 1 | Môi trường dev và lưới an toàn | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | ✅ Xong |
+| 2 | Hợp đồng API | Frontend biết chính xác API trả gì, lỗi trông thế nào | ✅ Xong |
+| **3** | **Bộ khung chạy thật (MVP-1)** | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | 🔜 **Tiếp theo** |
 | 4 | Lên staging | Thử trên điện thoại, qua mạng thật, có HTTPS | Chờ |
 | 5 | Tặng quà theo luật đã chốt | Tặng quà có hiệu ứng, rate theo host, level, quà độc quyền | Chờ |
 | 6 | Nạp tiền (xong MVP-2) | Nạp tiền sandbox, xem số dư; chargeback | Chờ |
@@ -98,7 +98,7 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 - [x] `make test` chạy 22 test tiền, tất cả qua (với `-race`)
 - [x] Cố tình phá code thì test báo đỏ: bỏ sắp xếp ví → deadlock 40P01; bỏ idempotency; câu SQL trừ tiền quên kiểm tra số dư (lỗi thành 500 thay vì 402); quên ghi bút toán → bất biến sổ cái báo lệch
 - [x] Rào chắn: thiếu `TEST_DATABASE_URL` hoặc trỏ vào DB không có đuôi `_test` thì từ chối chạy
-- [ ] CI chạy xanh trên GitHub *(mọi bước CI đã chạy thử trên máy; chờ push để chạy lần đầu)*
+- [x] CI chạy xanh trên GitHub (lần đầu ở commit `ff635d5`)
 
 **Đã chốt khi làm:** compose riêng với cổng không đụng dự án khác; LiveKit dùng 1 cổng UDP cố định và khai báo `node_ip`; test commit thật rồi xóa dữ liệu (không rollback, vì trigger cân sổ là DEFERRED); `go test -p 1 -race`; ghim sqlc v1.31.1, golang-migrate v4.20.1, Postgres 16, LiveKit v1.13.9.
 
@@ -106,7 +106,7 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 
 ---
 
-## Bước 2 — Hợp đồng API
+## Bước 2 — Hợp đồng API ✅
 
 **Để làm gì:** frontend và backend thống nhất **một bản mô tả API duy nhất**: đường dẫn, request, response, mã lỗi. Frontend code theo bản đó, không phải đoán.
 
@@ -118,9 +118,13 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 3. Quy ước chung: phân trang (`?limit=&cursor=`), định dạng thời gian (ISO 8601, UTC), tiền luôn là số nguyên.
 
 **Xong khi:**
-- [ ] Mọi lỗi trả đúng định dạng có `code`
-- [ ] `openapi.yaml` mô tả đủ endpoint, mở được bằng Swagger UI
-- [ ] Test của bước 1 kiểm tra cả `code` lỗi
+- [x] Mọi lỗi trả đúng định dạng có `code`, kể cả route không tồn tại, sai method, panic
+- [x] `api/openapi.yaml` mô tả đủ endpoint, xem bằng Swagger UI tại `/docs` (tắt khi `APP_ENV=production`)
+- [x] Test tầng HTTP kiểm tra `code` lỗi; **mọi response trong test được đối chiếu với `openapi.yaml`** (sai schema hoặc trả mã HTTP chưa khai báo thì đỏ)
+- [x] Test chống lệch: route có trong code mà thiếu trong hợp đồng (hoặc ngược lại), mã lỗi chưa khai báo → CI đỏ
+- [x] Cố tình phá thì test bắt được: thêm route quên ghi hợp đồng; đổi tên trường response; đổi mã lỗi; trả mã HTTP chưa khai báo
+
+**Đã chốt khi làm:** mã lỗi chi tiết cho trường hợp client phản ứng khác nhau (`INSUFFICIENT_BALANCE`, `ROOM_NOT_LIVE`, `ALREADY_LIVE`, `BANNED_FROM_ROOM`, `IDEMPOTENCY_KEY_REUSED`, `USERNAME_TAKEN`, `EMAIL_TAKEN`, `INVALID_CREDENTIALS`, `ACCOUNT_DISABLED`, `TOKEN_EXPIRED`/`TOKEN_INVALID`/`AUTH_REQUIRED`, `VALIDATION_ERROR` kèm `fields`); `Idempotency-Key` chuyển sang header; `POST /gifts/send` → `POST /rooms/{id}/gifts`; `422` cho lỗi validate, `400` cho request hỏng; thời gian luôn UTC (cấu hình ở tầng kết nối DB).
 
 **Học được gì:** API là hợp đồng giữa hai đội; vì sao lỗi cần mã máy đọc được; phân trang bằng cursor.
 

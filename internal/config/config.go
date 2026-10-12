@@ -8,6 +8,8 @@ import (
 )
 
 type Config struct {
+	// development | staging | production. Production tắt /docs và bật Gin release mode.
+	AppEnv             string
 	HTTPAddr           string
 	DatabaseURL        string
 	RedisAddr          string
@@ -24,6 +26,7 @@ type Config struct {
 // Load đọc cấu hình từ biến môi trường. Mọi secret đều bắt buộc, không có giá trị mặc định trong code.
 func Load() (Config, error) {
 	cfg := Config{
+		AppEnv:             getEnv("APP_ENV", "development"),
 		HTTPAddr:           getEnv("HTTP_ADDR", ":8080"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
@@ -45,6 +48,11 @@ func Load() (Config, error) {
 		if value == "" {
 			return Config{}, fmt.Errorf("missing required env %s", name)
 		}
+	}
+	switch cfg.AppEnv {
+	case "development", "staging", "production":
+	default:
+		return Config{}, fmt.Errorf("APP_ENV must be development, staging or production")
 	}
 	if len(cfg.JWTSecret) < 32 {
 		return Config{}, fmt.Errorf("JWT_SECRET must be at least 32 bytes")
@@ -71,3 +79,5 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+func (c Config) IsProduction() bool { return c.AppEnv == "production" }

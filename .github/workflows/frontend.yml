@@ -1,0 +1,46 @@
+# CI frontend: chạy khi có thay đổi trong livestream-frontend/ HOẶC khi hợp đồng API đổi.
+name: Frontend
+
+on:
+  push:
+    branches: [main]
+    paths: ['livestream-frontend/**', 'livestream-backend/api/openapi.yaml', '.github/workflows/frontend.yml']
+  pull_request:
+    branches: [main]
+    paths: ['livestream-frontend/**', 'livestream-backend/api/openapi.yaml', '.github/workflows/frontend.yml']
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: livestream-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: livestream-frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Kiểu TypeScript phải được sinh từ đúng hợp đồng hiện tại.
+      # Backend đổi openapi.yaml mà frontend chưa chạy `npm run gen:api` → đỏ.
+      - name: API types are up to date with openapi.yaml
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8080

@@ -37,8 +37,8 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 | 0 | Nền móng backend + luật dữ liệu tiền | (Chỉ backend) Đăng ký, phòng, chat, tặng quà; DB chặn mọi dữ liệu tiền sai | ✅ Xong |
 | 1 | Môi trường dev và lưới an toàn | Một lệnh dựng đủ môi trường; test tự động bảo vệ luồng tiền; CI chạy mỗi lần push | ✅ Xong |
 | 2 | Hợp đồng API | Frontend biết chính xác API trả gì, lỗi trông thế nào | ✅ Xong |
-| **3** | **Bộ khung chạy thật (MVP-1)** | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | 🔜 **Tiếp theo** |
-| 4 | Lên staging | Thử trên điện thoại, qua mạng thật, có HTTPS | Chờ |
+| 3 | Bộ khung chạy thật (MVP-1) | **Trình duyệt:** đăng nhập, xem danh sách phòng, host phát camera, viewer xem và chat | ✅ Xong |
+| **4** | **Lên staging** | Thử trên điện thoại, qua mạng thật, có HTTPS | 🔜 **Tiếp theo** |
 | 5 | Tặng quà theo luật đã chốt | Tặng quà có hiệu ứng, rate theo host, level, quà độc quyền | Chờ |
 | 6 | Nạp tiền (xong MVP-2) | Nạp tiền sandbox, xem số dư; chargeback | Chờ |
 | 7 | Vận hành phòng | Host kick người; rớt mạng tự kết nối lại không mất tin | Chờ |
@@ -130,7 +130,7 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 
 ---
 
-## Bước 3 — Bộ khung chạy thật (MVP-1)
+## Bước 3 — Bộ khung chạy thật (MVP-1) ✅
 
 **Để làm gì:** lần đầu tiên thấy sản phẩm chạy trên trình duyệt: **một người phát, một người xem và chat**.
 
@@ -155,10 +155,15 @@ Một dev nhiều năm kinh nghiệm không làm "hết backend rồi mới làm
 11. Host bấm "Kết thúc live".
 
 **Xong khi:**
-- [ ] Hai trình duyệt: A đăng nhập và lên sóng, B thấy phòng của A trong danh sách, vào xem có hình và tiếng
-- [ ] A và B chat qua lại
-- [ ] A kết thúc live thì phòng biến mất khỏi danh sách
-- [ ] Viewer không phát được hình (thử sửa client cũng không được)
+- [x] Hai trình duyệt: A đăng nhập và lên sóng, B thấy phòng của A trong danh sách, vào xem **nhận được khung hình thật** qua LiveKit (test Playwright với camera giả của Chromium, kiểm tra `videoWidth > 0`)
+- [x] A và B chat qua lại (WebSocket + Redis)
+- [x] A kết thúc live thì phòng biến mất khỏi danh sách
+- [x] Viewer không phát được hình: test Go giải mã token LiveKit của viewer, không có `canPublish`/`canPublishData`
+- [x] Cố tình phá (khung video chọn sai người) thì test e2e đỏ
+
+**Đã chốt khi làm:** monorepo (`TamiLiveProject/` chứa backend, frontend, docs; một repo GitHub, CI tách theo thư mục); npm; `openapi-typescript` + `openapi-fetch` (kiểu sinh từ hợp đồng, CI kiểm tra kiểu không lệch hợp đồng); Tailwind thuần; token tạm ở `localStorage` (nợ kỹ thuật → bước 8). Next.js 16.4 bật Cache Components: đọc `params`/`useSearchParams` trong `<Suspense>`, kết nối dài mở/đóng trong `useEffect`.
+
+**Chưa làm (để bước sau):** test e2e chưa chạy trên CI (cần dựng cả backend + LiveKit trong CI) → bước 4.
 
 **Học được gì:** WebRTC/SFU hoạt động thế nào; CORS; quản lý state realtime ở frontend; kết nối REST, WebSocket và LiveKit trong một màn hình.
 

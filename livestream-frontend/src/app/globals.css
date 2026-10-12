@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* App dùng giao diện tối cố định (kiểu app livestream). Màu nền/chữ đặt bằng class Tailwind ở <body>. */
+:root {
+  color-scheme: dark;
+}

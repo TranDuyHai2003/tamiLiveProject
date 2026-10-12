@@ -34,7 +34,7 @@ Go backend **không bao giờ** đi qua luồng video — chỉ cấp quyền. V
 
 | Tầng | Chọn | Lý do | Đánh giá |
 |---|---|---|---|
-| Frontend | **Next.js** (App Router) | SSR cho trang chủ/SEO, React ecosystem | ✅ Hợp lý |
+| Frontend | **Next.js 16** (App Router, Cache Components) | SSR cho trang chủ/SEO, React ecosystem | ✅ Đã dùng (bước 3), thư mục `livestream-frontend/` |
 | State FE | **Zustand** | Nhẹ, update tần suất cao không re-render toàn cây | ✅ |
 | Style | **Tailwind CSS** | Nhanh, nhất quán | ✅ |
 | Danh sách chat | `@tanstack/react-virtual` hoặc `react-window` | Virtual list cho chat cuộn nhanh | ✅ |

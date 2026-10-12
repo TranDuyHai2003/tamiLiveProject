@@ -1,56 +1,29 @@
-# TamiLive — livestream backend
+# TamiLive
 
-Backend Go cho nền tảng livestream: tài khoản, phòng live (LiveKit), chat realtime, quà tặng với sổ cái kế toán kép, PK, mini game.
+Nền tảng livestream: phát và xem live, chat realtime, quà tặng, PK, mini game.
 
-Tài liệu: [nghiệp vụ](docs/BUSINESS.md) · [database](docs/DATABASE.md) · [kiến trúc](docs/TECHSTACK.md) · [lộ trình](docs/ROADMAP.md)
+| Thư mục | Nội dung |
+|---|---|
+| [`livestream-backend/`](livestream-backend/) | API Go, Postgres, Redis; môi trường dev bằng docker-compose (cả LiveKit) |
+| [`livestream-frontend/`](livestream-frontend/) | Web app Next.js |
+| [`docs/`](docs/) | Tài liệu sản phẩm: [nghiệp vụ](docs/BUSINESS.md) · [database](docs/DATABASE.md) · [kiến trúc](docs/TECHSTACK.md) · [lộ trình](docs/ROADMAP.md) |
 
-## Yêu cầu
+Hợp đồng API giữa hai bên: [`livestream-backend/api/openapi.yaml`](livestream-backend/api/openapi.yaml). Frontend sinh kiểu TypeScript trực tiếp từ file này.
 
-| Công cụ | Phiên bản | Cài |
-|---|---|---|
-| Docker + Compose | Compose v2+ (`docker compose` hoặc `docker-compose`) | |
-| Go | theo `go.mod` | |
-| sqlc | **v1.31.1** (CI dùng đúng bản này) | `go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1` |
-| golang-migrate | **v4.20.1** | `go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.20.1` |
-
-## Chạy lần đầu
+## Chạy toàn bộ ở máy dev
 
 ```bash
-cp .env.example .env            # rồi điền JWT_SECRET và MINIGAME_HMAC_SECRET (openssl rand -hex 32)
-make up                         # Postgres :5440, Redis :6390, LiveKit :7980
-make migrate                    # tạo schema cho DB dev
-make run                        # API ở http://localhost:8080
+# 1. Backend + Postgres + Redis + LiveKit
+cd livestream-backend
+cp .env.example .env          # điền JWT_SECRET, MINIGAME_HMAC_SECRET
+make up && make migrate
+make run                      # http://localhost:8080 (tài liệu API: /docs)
+
+# 2. Frontend (terminal khác)
+cd livestream-frontend
+cp .env.example .env.local
+npm install
+npm run dev                   # http://localhost:3000
 ```
 
-`make help` liệt kê mọi lệnh.
-
-## Hợp đồng API
-
-`api/openapi.yaml` là nguồn sự thật của API. Khi server chạy ở dev, xem và thử API tại **http://localhost:8080/docs** (Swagger UI).
-
-- Thành công: `{"data": ...}`. Lỗi: `{"error": {"code", "message", "fields"?}}`; client xử lý theo `code`.
-- Thêm hoặc sửa endpoint thì sửa `openapi.yaml` cùng lúc: test sẽ đỏ nếu route và hợp đồng lệch nhau, hoặc response không khớp schema.
-
-## Test
-
-```bash
-make test
-```
-
-- Test chạy trên **Postgres thật** (database `livestream_test`), vì phần lớn luật về tiền nằm trong DB (ràng buộc, trigger cân sổ, khóa dòng). `make test` tạo lại DB test sạch trước mỗi lần chạy.
-- Test **commit thật** chứ không rollback, vì trigger cân sổ cái chỉ chạy lúc COMMIT. Dữ liệu được xóa trước mỗi test; sau mỗi test, bất biến sổ cái được kiểm tra tự động (tổng số dư = 0, mỗi ví khớp sổ cái).
-- Test từ chối chạy nếu `TEST_DATABASE_URL` trỏ vào DB có tên không kết thúc bằng `_test`.
-- Trước khi push, `make check` chạy các kiểm tra giống CI: gofmt, vet, build, code sqlc không lệch.
-
-## Cấu trúc
-
-```text
-main.go                    lắp ráp config, DB, Redis, service, router
-db/migration/              golang-migrate (nguồn sự thật của schema)
-db/query/                  SQL cho sqlc → sinh ra internal/db
-db/scripts/                script dev (VD nạp ngân sách thưởng)
-docker/                    cấu hình Postgres, LiveKit cho docker-compose
-internal/delivery/http/    handler, middleware, WebSocket
-internal/service/          luật nghiệp vụ, transaction, sổ cái (+ test tích hợp)
-internal/testutil/         kết nối DB test, reset dữ liệu, kiểm tra bất biến sổ cái
-```
+Chi tiết từng phần xem README trong thư mục tương ứng.
